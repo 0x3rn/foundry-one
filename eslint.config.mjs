@@ -12,12 +12,16 @@ export default defineConfig([
     "dist/**",
     "coverage/**",
     "node_modules/**",
+    "**/src/generated/**",
     "next-env.d.ts",
   ]),
   {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parser: tsParser,
+      globals: {
+        process: "readonly",
+      },
     },
     plugins: {
       "@typescript-eslint": tseslint,

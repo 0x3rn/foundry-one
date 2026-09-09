@@ -2,6 +2,7 @@
   "name": "foundry-one",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "packageManager": "npm@11.19.0",
   "workspaces": [
     "apps/*",
@@ -23,10 +24,18 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "test:foundation": "node scripts/verify-monorepo.mjs",
+    "test:rbac": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-rbac.ts",
+    "test:auth-guard": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-auth-guard.ts",
+    "test:workspace": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-workspace-service.ts",
+    "db:generate": "node scripts/run-prisma.mjs generate",
+    "db:validate": "node scripts/run-prisma.mjs validate",
+    "db:migrate:dev": "node scripts/run-prisma.mjs migrate dev",
     "format": "prettier --write ."
   },
   "devDependencies": {
     "prettier": "^3.6.2",
+    "prisma": "^6.12.0",
+    "tsx": "^4.23.13",
     "turbo": "^2.5.6"
   }
 }

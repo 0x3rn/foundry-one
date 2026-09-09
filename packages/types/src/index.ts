@@ -2,6 +2,16 @@ export type ProviderName = "supabase" | "firebase";
 
 export type WorkspaceRole = "owner" | "admin" | "developer" | "analyst" | "viewer";
 
+export type EnvironmentName = "production" | "staging" | "development";
+
+export type ProviderConnectionState =
+  | "pending"
+  | "healthy"
+  | "degraded"
+  | "disconnected"
+  | "credentials_expired"
+  | "permission_missing";
+
 export interface ProviderCapabilities {
   relationalDatabase: boolean;
   documentDatabase: boolean;

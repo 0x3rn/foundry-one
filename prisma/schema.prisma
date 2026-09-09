@@ -1,0 +1,423 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrganizationRole {
+  owner
+  admin
+  member
+}
+
+enum WorkspaceRole {
+  owner
+  admin
+  developer
+  analyst
+  viewer
+}
+
+enum ProviderName {
+  supabase
+  firebase
+}
+
+enum Environment {
+  production
+  staging
+  development
+}
+
+enum ConnectionStatus {
+  pending
+  healthy
+  degraded
+  disconnected
+  credentials_expired
+  permission_missing
+}
+
+enum AlertSeverity {
+  critical
+  high
+  medium
+  low
+  informational
+}
+
+enum NotificationChannel {
+  inbox
+  email
+  slack
+  discord
+  telegram
+  webhook
+}
+
+enum NotificationStatus {
+  pending
+  delivered
+  failed
+}
+
+enum FindingSeverity {
+  critical
+  high
+  medium
+  low
+  informational
+}
+
+enum FindingState {
+  open
+  acknowledged
+  resolved
+  ignored
+}
+
+enum IntegrationStatus {
+  active
+  paused
+  disconnected
+}
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions                Session[]
+  accounts                Account[]
+  organizationMemberships OrganizationMember[]
+  workspaceMemberships    WorkspaceMember[]
+  createdAuditLogs        AuditLog[]             @relation("AuditActor")
+  createdSavedQueries     SavedQuery[]           @relation("SavedQueryCreator")
+  createdAlerts            Alert[]                @relation("AlertCreator")
+  apiTokens                ApiToken[]
+  notifications            Notification[]
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@unique([providerId, accountId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+model Organization {
+  id        String               @id @default(cuid())
+  name      String
+  slug      String               @unique
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  members   OrganizationMember[]
+  workspaces Workspace[]
+}
+
+model OrganizationMember {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String
+  role           OrganizationRole @default(member)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model Workspace {
+  id             String            @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        WorkspaceMember[]
+  projects       Project[]
+  auditLogs      AuditLog[]
+  savedQueries   SavedQuery[]
+  alerts         Alert[]
+  notifications  Notification[]
+  integrations   Integration[]
+  apiTokens      ApiToken[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(viewer)
+  invitedAt   DateTime?
+  joinedAt    DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Project {
+  id                   String               @id @default(cuid())
+  workspaceId          String
+  name                 String
+  slug                 String
+  environment          Environment          @default(production)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  providerConnections  ProviderConnection[]
+  auditLogs            AuditLog[]
+  savedQueries         SavedQuery[]
+  alerts               Alert[]
+  notifications        Notification[]
+  metricSnapshots      MetricSnapshot[]
+  securityFindings     SecurityFinding[]
+  integrations         Integration[]
+  apiTokens            ApiToken[]
+
+  @@unique([workspaceId, slug])
+  @@unique([workspaceId, name, environment])
+  @@index([workspaceId, environment])
+}
+
+model ProviderConnection {
+  id          String           @id @default(cuid())
+  projectId   String
+  name        String
+  provider    ProviderName
+  status      ConnectionStatus @default(pending)
+  lastCheckedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  credential  Credential?
+
+  @@unique([projectId, name])
+  @@index([projectId, provider])
+}
+
+model Credential {
+  id                   String             @id @default(cuid())
+  providerConnectionId String             @unique
+  provider             ProviderName
+  algorithm            String
+  keyVersion           Int
+  iv                   String
+  authTag              String
+  ciphertext           String
+  rotatedAt            DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  providerConnection   ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  projectId    String?
+  actorUserId  String?
+  action       String
+  resourceType String
+  resourceId   String?
+  result       String
+  requestId    String?
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project      Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  actor        User?     @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model SavedQuery {
+  id          String    @id @default(cuid())
+  workspaceId String
+  projectId   String?
+  createdById String
+  name        String
+  sqlText     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy   User      @relation("SavedQueryCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId])
+}
+
+model Alert {
+  id          String        @id @default(cuid())
+  workspaceId String
+  projectId   String?
+  createdById String
+  name        String
+  severity    AlertSeverity @default(medium)
+  condition   Json
+  enabled     Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy   User          @relation("AlertCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  notifications Notification[]
+
+  @@index([workspaceId, enabled])
+  @@index([projectId, enabled])
+}
+
+model Notification {
+  id          String              @id @default(cuid())
+  workspaceId String
+  projectId   String?
+  alertId     String?
+  userId      String?
+  channel     NotificationChannel
+  status      NotificationStatus  @default(pending)
+  payload     Json
+  deliveredAt DateTime?
+  createdAt   DateTime            @default(now())
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  alert       Alert?              @relation(fields: [alertId], references: [id], onDelete: SetNull)
+  user        User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([userId, status])
+}
+
+model MetricSnapshot {
+  id         String   @id @default(cuid())
+  projectId  String
+  metricName String
+  value      Decimal  @db.Decimal(20, 6)
+  unit       String?
+  source     String
+  capturedAt DateTime
+  createdAt  DateTime @default(now())
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, metricName, capturedAt])
+  @@index([projectId, capturedAt])
+  @@index([metricName, capturedAt])
+}
+
+model SecurityFinding {
+  id             String         @id @default(cuid())
+  projectId      String
+  fingerprint    String
+  severity       FindingSeverity
+  state          FindingState   @default(open)
+  title          String
+  resourceType   String
+  resourceId     String?
+  evidence       Json
+  remediation    String?
+  firstSeenAt    DateTime       @default(now())
+  lastSeenAt     DateTime       @default(now())
+  resolvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  project        Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, fingerprint])
+  @@index([projectId, severity, state])
+  @@index([lastSeenAt])
+}
+
+model Integration {
+  id          String            @id @default(cuid())
+  workspaceId String
+  projectId   String?
+  name        String
+  provider    String
+  status      IntegrationStatus @default(active)
+  config      Json
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, name])
+  @@index([projectId, status])
+}
+
+model ApiToken {
+  id          String    @id @default(cuid())
+  workspaceId String
+  projectId   String?
+  userId      String
+  name        String
+  tokenHash   String    @unique
+  tokenPrefix String
+  scopes      Json
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, revokedAt])
+  @@index([projectId, revokedAt])
+  @@index([userId, revokedAt])
+}

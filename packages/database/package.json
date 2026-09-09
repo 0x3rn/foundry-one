@@ -2,14 +2,20 @@
   "name": "@foundry/database",
   "version": "0.1.0",
   "private": true,
+  "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "@foundry/types": "0.1.0"
+    "@foundry/types": "0.1.0",
+    "@prisma/client": "^6.12.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "prisma generate --schema ../../prisma/schema.prisma && tsc -p tsconfig.json",
     "lint": "eslint --config ../../eslint.config.mjs .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test"
+    "typecheck": "prisma generate --schema ../../prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
+    "test": "prisma generate --schema ../../prisma/schema.prisma && node --test"
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2",
+    "prisma": "^6.12.0"
   }
 }
