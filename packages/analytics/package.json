@@ -1,0 +1,15 @@
+{
+  "name": "@foundry/analytics",
+  "version": "0.1.0",
+  "private": true,
+  "types": "src/index.ts",
+  "dependencies": {
+    "@foundry/types": "0.1.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint --config ../../eslint.config.mjs .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test"
+  }
+}
