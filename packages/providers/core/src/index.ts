@@ -69,6 +69,14 @@ export interface DatabaseCatalog {
   readonly extensions: readonly DatabaseExtension[];
 }
 
+export interface DatabaseColumnDefinition {
+  readonly name: string;
+  readonly dataType: string;
+  readonly nullable: boolean;
+  readonly isPrimaryKey?: boolean;
+  readonly defaultValue?: string;
+}
+
 export interface NormalizedUser {
   readonly id: string;
   readonly email: string;
@@ -155,6 +163,12 @@ export interface DatabaseProvider {
   listColumns?(table: string): Promise<readonly NormalizedColumn[]>;
   describeTable?(table: string): Promise<DatabaseTableDetails>;
   describeCatalog?(): Promise<DatabaseCatalog>;
+  createTable?(
+    schema: string,
+    table: string,
+    columns: readonly DatabaseColumnDefinition[],
+  ): Promise<NormalizedTable>;
+  addColumn?(table: string, column: DatabaseColumnDefinition): Promise<NormalizedColumn>;
   insertRow?(table: string, values: ProviderRecord): Promise<NormalizedRow>;
   updateRow?(
     table: string,

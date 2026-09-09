@@ -99,6 +99,12 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSchemaSaving, setIsSchemaSaving] = useState(false);
+  const [newTableName, setNewTableName] = useState("");
+  const [newTableColumn, setNewTableColumn] = useState("");
+  const [newTableType, setNewTableType] = useState("text");
+  const [newColumnName, setNewColumnName] = useState("");
+  const [newColumnType, setNewColumnType] = useState("text");
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
@@ -128,7 +134,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [projectId, reloadToken]);
 
   useEffect(() => {
     if (!selectedTable) return;
@@ -337,6 +343,72 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     }
   }
 
+  async function createTable(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const table = newTableName.trim();
+    const column = newTableColumn.trim();
+    if (!table || !column) {
+      setError("A table name and first column are required.");
+      return;
+    }
+    setIsSchemaSaving(true);
+    setError(undefined);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "create-table",
+          schema: "public",
+          table,
+          columns: [{ name: column, dataType: newTableType, nullable: false }],
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<DatabaseTable>;
+      if (!response.ok || !body.data)
+        throw new Error(body.error?.message ?? "The table could not be created.");
+      setNewTableName("");
+      setNewTableColumn("");
+      setSelectedTable(body.data.id);
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The table could not be created.");
+    } finally {
+      setIsSchemaSaving(false);
+    }
+  }
+
+  async function addColumn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const column = newColumnName.trim();
+    if (!selectedTable || !column) {
+      setError("A column name is required.");
+      return;
+    }
+    setIsSchemaSaving(true);
+    setError(undefined);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "add-column",
+          table: selectedTable,
+          column: { name: column, dataType: newColumnType, nullable: true },
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<DatabaseColumn>;
+      if (!response.ok || !body.data)
+        throw new Error(body.error?.message ?? "The column could not be added.");
+      setNewColumnName("");
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The column could not be added.");
+    } finally {
+      setIsSchemaSaving(false);
+    }
+  }
+
   return (
     <div className="foundry-database-explorer">
       <div className="foundry-database-header">
@@ -352,6 +424,54 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
           <span>{catalog.extensions.length} extensions</span>
         </div>
       ) : null}
+      <div className="foundry-database-schema-tools">
+        <form onSubmit={createTable}>
+          <strong>New table</strong>
+          <input
+            value={newTableName}
+            onChange={(event) => setNewTableName(event.target.value)}
+            placeholder="table name"
+          />
+          <input
+            value={newTableColumn}
+            onChange={(event) => setNewTableColumn(event.target.value)}
+            placeholder="first column"
+          />
+          <select value={newTableType} onChange={(event) => setNewTableType(event.target.value)}>
+            <option value="text">text</option>
+            <option value="integer">integer</option>
+            <option value="boolean">boolean</option>
+            <option value="uuid">uuid</option>
+            <option value="timestamp with time zone">timestamp with time zone</option>
+          </select>
+          <button type="submit" disabled={isSchemaSaving}>
+            Create
+          </button>
+        </form>
+        {selectedTable ? (
+          <form onSubmit={addColumn}>
+            <strong>Add column</strong>
+            <input
+              value={newColumnName}
+              onChange={(event) => setNewColumnName(event.target.value)}
+              placeholder="column name"
+            />
+            <select
+              value={newColumnType}
+              onChange={(event) => setNewColumnType(event.target.value)}
+            >
+              <option value="text">text</option>
+              <option value="integer">integer</option>
+              <option value="boolean">boolean</option>
+              <option value="uuid">uuid</option>
+              <option value="timestamp with time zone">timestamp with time zone</option>
+            </select>
+            <button type="submit" disabled={isSchemaSaving}>
+              Add
+            </button>
+          </form>
+        ) : null}
+      </div>
       <form className="foundry-database-toolbar" onSubmit={submitSearch}>
         <label>
           Search rows

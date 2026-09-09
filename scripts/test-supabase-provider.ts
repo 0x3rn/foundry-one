@@ -150,8 +150,10 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     id: index + 1,
     label: `row-${index + 1}`,
   }));
+  const executedQueries: string[] = [];
   const database: SupabaseDatabaseClient = {
     async query(query) {
+      executedQueries.push(query);
       if (query.includes("information_schema.tables")) {
         return [{ schema_name: "public", table_name: "orders", table_type: "BASE TABLE" }];
       }
@@ -264,6 +266,40 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     relations: [],
     triggers: ["orders_updated_at"],
   });
+  await provider.services.database?.createTable?.("public", "invoices", [
+    {
+      name: "id",
+      dataType: "uuid",
+      nullable: false,
+      isPrimaryKey: true,
+      defaultValue: "gen_random_uuid()",
+    },
+    { name: "total", dataType: "numeric", nullable: false },
+  ]);
+  await provider.services.database?.addColumn?.("public.orders", {
+    name: "notes",
+    dataType: "text",
+    nullable: true,
+  });
+  assert.ok(executedQueries.some((query) => query.includes('CREATE TABLE "public"."invoices"')));
+  assert.ok(executedQueries.some((query) => query.includes('ALTER TABLE "public"."orders"')));
+  await assert.rejects(
+    () =>
+      provider.services.database?.createTable?.("public", "unsafe", [
+        { name: "value", dataType: "money; DROP TABLE users", nullable: true },
+      ]),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
+  await assert.rejects(
+    () =>
+      provider.services.database?.addColumn?.("public.orders", {
+        name: "id2",
+        dataType: "uuid",
+        nullable: false,
+        isPrimaryKey: true,
+      }),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
   const page = await provider.services.database?.listRows("public.orders");
   assert.equal(page?.items.length, 50);
   assert.equal(page?.nextCursor, "50");

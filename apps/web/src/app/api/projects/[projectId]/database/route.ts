@@ -11,6 +11,7 @@ import { createKeyringFromEnvironment, CredentialVault, VaultError } from "@foun
 import {
   ProviderError,
   ProviderLifecycle,
+  type DatabaseColumnDefinition,
   type DatabaseRowQuery,
   type ProviderRecord,
   type ProviderScalar,
@@ -91,29 +92,84 @@ function isProviderScalar(value: unknown): value is ProviderScalar {
   );
 }
 
+function parseColumnDefinition(value: unknown): DatabaseColumnDefinition {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new SupabaseCredentialError("A column definition must be an object.");
+  }
+  const column = value as Record<string, unknown>;
+  if (
+    typeof column.name !== "string" ||
+    typeof column.dataType !== "string" ||
+    typeof column.nullable !== "boolean" ||
+    (column.isPrimaryKey !== undefined && typeof column.isPrimaryKey !== "boolean") ||
+    (column.defaultValue !== undefined && typeof column.defaultValue !== "string")
+  ) {
+    throw new SupabaseCredentialError(
+      "A column needs a name, dataType, nullable flag, and optional primary-key/default values.",
+    );
+  }
+  return {
+    name: column.name,
+    dataType: column.dataType,
+    nullable: column.nullable,
+    ...(column.isPrimaryKey !== undefined ? { isPrimaryKey: column.isPrimaryKey } : {}),
+    ...(column.defaultValue !== undefined ? { defaultValue: column.defaultValue } : {}),
+  };
+}
+
 function parseMutationBody(value: unknown): {
-  readonly operation: "insert" | "update" | "delete" | "prepare-delete";
+  readonly operation:
+    "insert" | "update" | "delete" | "prepare-delete" | "create-table" | "add-column";
   readonly table: string;
   readonly values?: ProviderRecord;
   readonly identity?: { readonly column: string; readonly value: ProviderScalar };
   readonly confirmationToken?: string;
+  readonly schema?: string;
+  readonly columns?: readonly DatabaseColumnDefinition[];
+  readonly column?: DatabaseColumnDefinition;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new SupabaseCredentialError("Database mutation input must be a JSON object.");
   }
   const body = value as Record<string, unknown>;
   if (
-    !(["insert", "update", "delete", "prepare-delete"] as readonly unknown[]).includes(
-      body.operation,
-    )
+    !(
+      [
+        "insert",
+        "update",
+        "delete",
+        "prepare-delete",
+        "create-table",
+        "add-column",
+      ] as readonly unknown[]
+    ).includes(body.operation)
   ) {
     throw new SupabaseCredentialError(
-      "operation must be insert, update, delete, or prepare-delete.",
+      "operation must be insert, update, delete, prepare-delete, create-table, or add-column.",
     );
   }
   if (typeof body.table !== "string" || !body.table.trim()) {
     throw new SupabaseCredentialError("table is required.");
   }
+  const schema = body.schema;
+  if (
+    (body.operation === "create-table" && (typeof schema !== "string" || !schema.trim())) ||
+    (body.operation === "add-column" && schema !== undefined)
+  ) {
+    throw new SupabaseCredentialError(
+      "create-table requires a schema and add-column does not accept one.",
+    );
+  }
+  const columns =
+    body.operation === "create-table"
+      ? (() => {
+          if (!Array.isArray(body.columns)) {
+            throw new SupabaseCredentialError("create-table requires a columns array.");
+          }
+          return body.columns.map(parseColumnDefinition);
+        })()
+      : undefined;
+  const column = body.operation === "add-column" ? parseColumnDefinition(body.column) : undefined;
   const values = body.values;
   if (values !== undefined && (!values || typeof values !== "object" || Array.isArray(values))) {
     throw new SupabaseCredentialError("values must be an object when provided.");
@@ -148,7 +204,8 @@ function parseMutationBody(value: unknown): {
     throw new SupabaseCredentialError("confirmationToken must be a short string when provided.");
   }
   return {
-    operation: body.operation as "insert" | "update" | "delete" | "prepare-delete",
+    operation: body.operation as
+      "insert" | "update" | "delete" | "prepare-delete" | "create-table" | "add-column",
     table: body.table.trim(),
     ...(normalizedValues ? { values: normalizedValues } : {}),
     ...(normalizedIdentity
@@ -160,6 +217,9 @@ function parseMutationBody(value: unknown): {
         }
       : {}),
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(typeof schema === "string" ? { schema: schema.trim() } : {}),
+    ...(columns ? { columns } : {}),
+    ...(column ? { column } : {}),
   };
 }
 
@@ -352,6 +412,16 @@ export async function POST(
         409,
       );
     }
+    if (input.operation === "create-table" && (!input.schema || !input.columns)) {
+      return errorResponse(
+        "SCHEMA_REQUIRED",
+        "A schema and columns are required to create a table.",
+        400,
+      );
+    }
+    if (input.operation === "add-column" && !input.column) {
+      return errorResponse("COLUMN_REQUIRED", "A column is required to alter a table.", 400);
+    }
     const values = input.values ?? {};
 
     const client = createDatabaseClient();
@@ -406,7 +476,12 @@ export async function POST(
       return errorResponse("DATABASE_UNAVAILABLE", "The provider connection is unavailable.", 409);
     const vault = new CredentialVault(createKeyringFromEnvironment());
     const confirmationStore = new PrismaConfirmationChallengeStore(client);
-    const action = input.operation === "delete" ? "row.delete" : `database.row.${input.operation}`;
+    const action =
+      input.operation === "delete"
+        ? "row.delete"
+        : input.operation === "create-table" || input.operation === "add-column"
+          ? `database.schema.${input.operation}`
+          : `database.row.${input.operation}`;
 
     const data = await executeAuthorizedProjectAction(
       {
@@ -428,8 +503,11 @@ export async function POST(
             }
           : {}),
         provider: "supabase",
-        resourceType: "database_row",
-        resourceId: input.identity?.column,
+        resourceType:
+          input.operation === "create-table" || input.operation === "add-column"
+            ? "database_schema"
+            : "database_row",
+        resourceId: input.identity?.column ?? input.table,
         requestId: requestId(request),
         rateLimiter: databaseRateLimiter,
         rateLimitKey: `${project.workspaceId}:${session.user.id}`,
@@ -456,6 +534,30 @@ export async function POST(
               actorUserId: session.user.id,
               action: "row.delete",
             });
+          }
+          if (input.operation === "create-table") {
+            if (!service.createTable) {
+              throw new ProviderError(
+                "capability_unsupported",
+                "This connection does not support table creation.",
+                { provider: "supabase", operation: "database.schema.create-table" },
+              );
+            }
+            return service.createTable(
+              input.schema as string,
+              input.table,
+              input.columns as NonNullable<typeof input.columns>,
+            );
+          }
+          if (input.operation === "add-column") {
+            if (!service.addColumn) {
+              throw new ProviderError(
+                "capability_unsupported",
+                "This connection does not support adding columns.",
+                { provider: "supabase", operation: "database.schema.add-column" },
+              );
+            }
+            return service.addColumn(input.table, input.column as NonNullable<typeof input.column>);
           }
           if (input.operation === "insert") {
             if (!service.insertRow) {
@@ -505,7 +607,10 @@ export async function POST(
       audit,
     );
 
-    return Response.json({ data }, { status: input.operation === "insert" ? 201 : 200 });
+    return Response.json(
+      { data },
+      { status: input.operation === "insert" || input.operation === "create-table" ? 201 : 200 },
+    );
   } catch (error) {
     if (error instanceof AuthConfigurationError)
       return errorResponse(error.code, error.message, 503);

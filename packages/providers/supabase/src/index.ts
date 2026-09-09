@@ -7,6 +7,7 @@ import type {
   BackendProviderFactory,
   DatabaseConstraint,
   DatabaseCatalog,
+  DatabaseColumnDefinition,
   DatabaseExtension,
   DatabaseFunction,
   DatabaseIndex,
@@ -242,6 +243,70 @@ function splitTableReference(value: string): { readonly schema: string; readonly
   return { schema, table };
 }
 
+function validateDataType(value: string): string {
+  const normalized = value.trim();
+  if (
+    !/^(smallint|integer|bigint|decimal|numeric|real|double precision|boolean|text|uuid|date|json|jsonb|bytea|varchar(?:\(\d+\))?|char(?:\(\d+\))?|timestamp(?: with(?:out)? time zone)?)(\[\])?$/i.test(
+      normalized,
+    )
+  ) {
+    throw new ProviderError(
+      "invalid_configuration",
+      "The PostgreSQL data type is not supported by the visual schema editor.",
+      { provider: "supabase", operation: "validate PostgreSQL data type" },
+    );
+  }
+  return normalized;
+}
+
+function validateDefaultValue(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim();
+  if (
+    !/^(CURRENT_TIMESTAMP|CURRENT_DATE|TRUE|FALSE|NULL|gen_random_uuid\(\)|-?\d+(?:\.\d+)?|'(?:''|[^'])*')$/i.test(
+      normalized,
+    )
+  ) {
+    throw new ProviderError(
+      "invalid_configuration",
+      "The default value is not supported by the visual schema editor.",
+      { provider: "supabase", operation: "validate PostgreSQL default" },
+    );
+  }
+  return normalized;
+}
+
+function validateColumnDefinition(column: DatabaseColumnDefinition): {
+  readonly name: string;
+  readonly dataType: string;
+  readonly nullable: boolean;
+  readonly isPrimaryKey: boolean;
+  readonly defaultValue?: string;
+} {
+  if (!column.name.trim()) {
+    throw new ProviderError("invalid_configuration", "A column name is required.", {
+      provider: "supabase",
+      operation: "validate PostgreSQL column",
+    });
+  }
+  quoteIdentifier(column.name);
+  if (column.isPrimaryKey && column.nullable) {
+    throw new ProviderError("invalid_configuration", "A primary key column cannot be nullable.", {
+      provider: "supabase",
+      operation: "validate PostgreSQL column",
+    });
+  }
+  return {
+    name: column.name,
+    dataType: validateDataType(column.dataType),
+    nullable: column.nullable,
+    isPrimaryKey: column.isPrimaryKey ?? false,
+    ...(validateDefaultValue(column.defaultValue)
+      ? { defaultValue: validateDefaultValue(column.defaultValue) }
+      : {}),
+  };
+}
+
 function defaultDatabaseClient(databaseUrl: string): SupabaseDatabaseClient {
   const client = postgres(databaseUrl, {
     max: 1,
@@ -308,6 +373,63 @@ function createDatabaseProvider(
   client: SupabaseDatabaseClient = defaultDatabaseClient(databaseUrl),
 ): DatabaseProvider {
   return {
+    async createTable(schema, table, columns): Promise<NormalizedTable> {
+      const quotedSchema = quoteIdentifier(schema);
+      const quotedTable = quoteIdentifier(table);
+      if (columns.length === 0 || columns.length > 50) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "A table must define between 1 and 50 columns.",
+          { provider: "supabase", operation: "create PostgreSQL table" },
+        );
+      }
+      const normalizedColumns = columns.map(validateColumnDefinition);
+      const names = new Set(normalizedColumns.map((column) => column.name));
+      if (names.size !== normalizedColumns.length) {
+        throw new ProviderError("invalid_configuration", "Table column names must be unique.", {
+          provider: "supabase",
+          operation: "create PostgreSQL table",
+        });
+      }
+      if (normalizedColumns.filter((column) => column.isPrimaryKey).length > 1) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "The visual schema editor currently supports one primary key column.",
+          { provider: "supabase", operation: "create PostgreSQL table" },
+        );
+      }
+      const definition = normalizedColumns
+        .map(
+          (column) =>
+            `${quoteIdentifier(column.name)} ${column.dataType}${column.defaultValue ? ` DEFAULT ${column.defaultValue}` : ""}${column.isPrimaryKey ? " PRIMARY KEY" : ""}${column.nullable ? "" : " NOT NULL"}`,
+        )
+        .join(", ");
+      await client.query(`CREATE TABLE ${quotedSchema}.${quotedTable} (${definition})`);
+      return { id: `${schema}.${table}`, name: table, schema, kind: "table", isView: false };
+    },
+    async addColumn(table, column): Promise<NormalizedColumn> {
+      const reference = splitTableReference(table);
+      const normalizedColumn = validateColumnDefinition(column);
+      if (normalizedColumn.isPrimaryKey) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Adding a primary key requires a table constraint workflow.",
+          { provider: "supabase", operation: "add PostgreSQL column" },
+        );
+      }
+      await client.query(
+        `ALTER TABLE ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} ADD COLUMN ${quoteIdentifier(normalizedColumn.name)} ${normalizedColumn.dataType}${normalizedColumn.defaultValue ? ` DEFAULT ${normalizedColumn.defaultValue}` : ""}${normalizedColumn.nullable ? "" : " NOT NULL"}`,
+      );
+      return {
+        id: `${table}.${normalizedColumn.name}`,
+        name: normalizedColumn.name,
+        dataType: normalizedColumn.dataType,
+        nullable: normalizedColumn.nullable,
+        isPrimaryKey: false,
+        isIdentity: false,
+        ...(normalizedColumn.defaultValue ? { defaultValue: normalizedColumn.defaultValue } : {}),
+      };
+    },
     async listTables(): Promise<readonly NormalizedTable[]> {
       const rows = await client.query<{
         schema_name: string;

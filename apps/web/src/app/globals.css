@@ -1166,6 +1166,42 @@ kbd {
   border: 1px solid var(--line);
   border-radius: 4px;
 }
+.foundry-database-schema-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 25px 12px;
+}
+.foundry-database-schema-tools form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-database-schema-tools input,
+.foundry-database-schema-tools select {
+  width: 105px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+.foundry-database-schema-tools button {
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-muted);
+  color: var(--ink-soft);
+  font-size: 9px;
+  cursor: pointer;
+}
 .foundry-database-toolbar label {
   display: grid;
   gap: 4px;
