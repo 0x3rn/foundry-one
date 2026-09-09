@@ -1,10 +1,10 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type { EncryptedEnvelope } from "@foundry/encryption";
 import type {
   ProviderConnectionStore,
   StoredProviderConnection,
 } from "@foundry/providers-core/connection-service";
-import type { ProviderConnectionState, ProviderName } from "@foundry/types";
+import type { ProviderCapabilities, ProviderConnectionState, ProviderName } from "@foundry/types";
 
 type ProviderConnectionWithCredential = Awaited<
   ReturnType<PrismaClient["providerConnection"]["findUnique"]>
@@ -18,6 +18,7 @@ type ProviderConnectionWithCredential = Awaited<
     authTag: string;
     ciphertext: string;
   } | null;
+  capabilities: unknown;
 };
 
 function toStoredConnection(record: ProviderConnectionWithCredential): StoredProviderConnection {
@@ -31,6 +32,9 @@ function toStoredConnection(record: ProviderConnectionWithCredential): StoredPro
     name: record.name,
     provider: record.provider as ProviderName,
     status: record.status as ProviderConnectionState,
+    ...(record.capabilities
+      ? { capabilities: record.capabilities as unknown as ProviderCapabilities }
+      : {}),
     ...(record.lastCheckedAt ? { lastCheckedAt: record.lastCheckedAt.toISOString() } : {}),
     credential: {
       algorithm: record.credential.algorithm as EncryptedEnvelope["algorithm"],
@@ -54,6 +58,9 @@ export class PrismaProviderConnectionStore implements ProviderConnectionStore {
         name: input.name,
         provider: input.provider,
         status: input.status,
+        capabilities: input.capabilities
+          ? (input.capabilities as unknown as Prisma.InputJsonValue)
+          : undefined,
         lastCheckedAt: input.lastCheckedAt ? new Date(input.lastCheckedAt) : undefined,
         credential: {
           create: {
@@ -94,7 +101,10 @@ export class PrismaProviderConnectionStore implements ProviderConnectionStore {
   async update(
     id: string,
     input: Partial<
-      Pick<StoredProviderConnection, "name" | "status" | "lastCheckedAt" | "credential">
+      Pick<
+        StoredProviderConnection,
+        "name" | "status" | "capabilities" | "lastCheckedAt" | "credential"
+      >
     >,
   ): Promise<StoredProviderConnection> {
     const record = await this.database.providerConnection.update({
@@ -102,6 +112,13 @@ export class PrismaProviderConnectionStore implements ProviderConnectionStore {
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.capabilities !== undefined
+          ? {
+              capabilities: input.capabilities
+                ? (input.capabilities as unknown as Prisma.InputJsonValue)
+                : Prisma.JsonNull,
+            }
+          : {}),
         ...(input.lastCheckedAt !== undefined
           ? { lastCheckedAt: new Date(input.lastCheckedAt) }
           : {}),

@@ -242,6 +242,7 @@ model ProviderConnection {
   name        String
   provider    ProviderName
   status      ConnectionStatus @default(pending)
+  capabilities Json?
   lastCheckedAt DateTime?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt

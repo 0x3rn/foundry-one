@@ -1,5 +1,5 @@
 import type { EncryptedEnvelope, CredentialVault } from "@foundry/encryption";
-import type { ProviderConnectionState, ProviderName } from "@foundry/types";
+import type { ProviderCapabilities, ProviderConnectionState, ProviderName } from "@foundry/types";
 import { ProviderError, ProviderLifecycle, type BackendProvider } from "./index";
 
 export interface StoredProviderConnection {
@@ -8,6 +8,7 @@ export interface StoredProviderConnection {
   readonly name: string;
   readonly provider: ProviderName;
   readonly status: ProviderConnectionState;
+  readonly capabilities?: ProviderCapabilities;
   readonly lastCheckedAt?: string;
   readonly credential: EncryptedEnvelope;
 }
@@ -18,6 +19,7 @@ export interface PublicProviderConnection {
   readonly name: string;
   readonly provider: ProviderName;
   readonly status: ProviderConnectionState;
+  readonly capabilities?: ProviderCapabilities;
   readonly lastCheckedAt?: string;
 }
 
@@ -28,7 +30,10 @@ export interface ProviderConnectionStore {
   update(
     id: string,
     input: Partial<
-      Pick<StoredProviderConnection, "name" | "status" | "lastCheckedAt" | "credential">
+      Pick<
+        StoredProviderConnection,
+        "name" | "status" | "capabilities" | "lastCheckedAt" | "credential"
+      >
     >,
   ): Promise<StoredProviderConnection>;
   delete(id: string): Promise<void>;
@@ -62,6 +67,7 @@ function toPublicConnection(connection: StoredProviderConnection): PublicProvide
     name: connection.name,
     provider: connection.provider,
     status: connection.status,
+    ...(connection.capabilities ? { capabilities: connection.capabilities } : {}),
     ...(connection.lastCheckedAt ? { lastCheckedAt: connection.lastCheckedAt } : {}),
   };
 }
@@ -168,9 +174,11 @@ export class ProviderConnectionService {
       const provider = await createProvider({ provider: existing.provider, credentials });
       lifecycle = new ProviderLifecycle(provider);
       const result = await lifecycle.connect();
+      const capabilities = await provider.getCapabilities();
       return toPublicConnection(
         await this.store.update(connectionId, {
           status: result.state,
+          capabilities,
           lastCheckedAt: result.checkedAt,
         }),
       );
