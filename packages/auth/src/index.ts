@@ -55,6 +55,14 @@ export function getAuth() {
     throw new AuthConfigurationError("BETTER_AUTH_SECRET must be at least 32 characters.");
   }
 
+  const trustedOrigins = (
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000,http://localhost:3100"
+  )
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+
   return betterAuth({
     database: prismaAdapter(getDatabaseClient(), {
       provider: "postgresql",
@@ -67,8 +75,10 @@ export function getAuth() {
         joins: true,
       },
     },
+    baseURL,
     plugins: [nextCookies()],
     secret,
+    trustedOrigins,
   });
 }
 
