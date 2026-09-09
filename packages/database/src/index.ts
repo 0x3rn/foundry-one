@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
 export { Prisma, PrismaClient };
+export { PrismaAuditLogWriter } from "./audit-log-writer";
 export { PrismaProviderConnectionStore } from "./provider-connection-store";
 
 export class DatabaseConfigurationError extends Error {

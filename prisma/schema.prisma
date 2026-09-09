@@ -273,6 +273,7 @@ model AuditLog {
   workspaceId  String
   projectId    String?
   actorUserId  String?
+  provider     String?
   action       String
   resourceType String
   resourceId   String?
