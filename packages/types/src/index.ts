@@ -13,6 +13,7 @@ export type ProviderConnectionState =
   | "permission_missing";
 
 export interface ProviderCapabilities {
+  projectMetadata: boolean;
   relationalDatabase: boolean;
   documentDatabase: boolean;
   realtimeDatabase: boolean;
