@@ -1,11 +1,15 @@
 import { clearTimeout, setTimeout } from "node:timers";
 import { URL } from "node:url";
+import postgres from "postgres";
 import type {
   AuthProvider,
   BackendProvider,
   BackendProviderFactory,
   DatabaseProvider,
   NormalizedFile,
+  NormalizedColumn,
+  NormalizedTable,
+  NormalizedRow,
   NormalizedUser,
   ProviderConnectionResult,
   ProviderPage,
@@ -36,6 +40,14 @@ export interface SupabaseHttpClient {
     url: string,
     init: { readonly method: "GET" | "POST"; readonly headers: Readonly<Record<string, string>> },
   ): Promise<SupabaseHttpResponse>;
+}
+
+export interface SupabaseDatabaseClient {
+  query<T extends Record<string, unknown>>(
+    query: string,
+    parameters?: readonly unknown[],
+  ): Promise<readonly T[]>;
+  end(): Promise<void>;
 }
 
 export class SupabaseCredentialError extends Error {
@@ -199,14 +211,250 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function quoteIdentifier(value: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(value)) {
+    throw new ProviderError("invalid_configuration", "Database identifiers must be simple names.", {
+      provider: "supabase",
+      operation: "validate database identifier",
+    });
+  }
+  return `"${value}"`;
+}
+
+function splitTableReference(value: string): { readonly schema: string; readonly table: string } {
+  const [schema, table, ...rest] = value.split(".");
+  if (!schema || !table || rest.length > 0) {
+    throw new ProviderError(
+      "invalid_configuration",
+      "A table reference must use the schema.table format.",
+      { provider: "supabase", operation: "validate table reference" },
+    );
+  }
+  return { schema, table };
+}
+
+function defaultDatabaseClient(databaseUrl: string): SupabaseDatabaseClient {
+  const client = postgres(databaseUrl, {
+    max: 1,
+    connect_timeout: 10,
+    idle_timeout: 10,
+    ssl: "require",
+  });
+  return {
+    async query<T extends Record<string, unknown>>(query: string, parameters = []) {
+      return (await client.unsafe<T[]>(query, [...parameters])) as readonly T[];
+    },
+    async end() {
+      await client.end({ timeout: 5 });
+    },
+  };
+}
+
+function normalizeRowValue(value: unknown): string | number | boolean | null | string[] {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+    return value as string[];
+  }
+  return JSON.stringify(value);
+}
+
+function normalizeRow(row: Record<string, unknown>, index: number): NormalizedRow {
+  const values = Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, normalizeRowValue(value)]),
+  );
+  const stableId = Object.entries(row).find(([key]) => key === "id" || key.endsWith("_id"))?.[1];
+  return {
+    id: stableId === undefined ? `row-${index}` : String(stableId),
+    values,
+  };
+}
+
+function createDatabaseProvider(
+  databaseUrl: string,
+  client: SupabaseDatabaseClient = defaultDatabaseClient(databaseUrl),
+): DatabaseProvider {
+  return {
+    async listTables(): Promise<readonly NormalizedTable[]> {
+      const rows = await client.query<{
+        schema_name: string;
+        table_name: string;
+        table_type: string;
+      }>(
+        `SELECT table_schema AS schema_name, table_name, table_type
+         FROM information_schema.tables
+         WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY table_schema, table_name`,
+      );
+      return rows.map((row) => ({
+        id: `${row.schema_name}.${row.table_name}`,
+        name: row.table_name,
+        schema: row.schema_name,
+        kind: "table",
+        isView: row.table_type !== "BASE TABLE",
+      }));
+    },
+    async listColumns(table): Promise<readonly NormalizedColumn[]> {
+      const reference = splitTableReference(table);
+      const rows = await client.query<{
+        column_name: string;
+        data_type: string;
+        is_nullable: string;
+        column_default: string | null;
+        is_identity: string;
+        is_primary_key: boolean;
+      }>(
+        `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, c.is_identity,
+                EXISTS (
+                  SELECT 1
+                  FROM information_schema.key_column_usage k
+                  JOIN information_schema.table_constraints tc
+                    ON tc.constraint_name = k.constraint_name
+                   AND tc.table_schema = k.table_schema
+                   AND tc.table_name = k.table_name
+                  WHERE k.table_schema = $1 AND k.table_name = $2
+                    AND k.column_name = c.column_name
+                    AND tc.constraint_type = 'PRIMARY KEY'
+                ) AS is_primary_key
+         FROM information_schema.columns c
+         WHERE c.table_schema = $1 AND c.table_name = $2
+         ORDER BY c.ordinal_position`,
+        [reference.schema, reference.table],
+      );
+      return rows.map((row) => ({
+        id: `${table}.${row.column_name}`,
+        name: row.column_name,
+        dataType: row.data_type,
+        nullable: row.is_nullable === "YES",
+        ...(row.column_default ? { defaultValue: row.column_default } : {}),
+        isPrimaryKey: row.is_primary_key,
+        isIdentity: row.is_identity === "YES",
+      }));
+    },
+    async listRows(table, cursor): Promise<ProviderPage<NormalizedRow>> {
+      const reference = splitTableReference(table);
+      const pageSize = 50;
+      const offset = cursor ? Number.parseInt(cursor, 10) : 0;
+      if (!Number.isInteger(offset) || offset < 0) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "The row cursor must be a non-negative integer.",
+          {
+            provider: "supabase",
+            operation: "list database rows",
+          },
+        );
+      }
+      const rows = await client.query<Record<string, unknown>>(
+        `SELECT * FROM ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} LIMIT $1 OFFSET $2`,
+        [pageSize + 1, offset],
+      );
+      const hasNextPage = rows.length > pageSize;
+      return {
+        items: rows.slice(0, pageSize).map((row, index) => normalizeRow(row, offset + index)),
+        ...(hasNextPage ? { nextCursor: String(offset + pageSize) } : {}),
+      };
+    },
+    async insertRow(table, values): Promise<NormalizedRow> {
+      const reference = splitTableReference(table);
+      const entries = Object.entries(values);
+      if (entries.length === 0) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "At least one column is required to insert a row.",
+          {
+            provider: "supabase",
+            operation: "insert database row",
+          },
+        );
+      }
+      const columns = entries.map(([column]) => quoteIdentifier(column));
+      const placeholders = entries.map((_, index) => `$${index + 1}`).join(", ");
+      const rows = await client.query<Record<string, unknown>>(
+        `INSERT INTO ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} (${columns.join(", ")}) VALUES (${placeholders}) RETURNING *`,
+        entries.map(([, value]) => value),
+      );
+      if (!rows[0]) {
+        throw new ProviderError(
+          "connection_failed",
+          "The database did not return the inserted row.",
+          {
+            provider: "supabase",
+            operation: "insert database row",
+          },
+        );
+      }
+      return normalizeRow(rows[0], 0);
+    },
+    async updateRow(table, identity, values): Promise<NormalizedRow> {
+      const reference = splitTableReference(table);
+      const entries = Object.entries(values);
+      if (entries.length === 0) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "At least one column is required to update a row.",
+          {
+            provider: "supabase",
+            operation: "update database row",
+          },
+        );
+      }
+      const assignments = entries
+        .map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`)
+        .join(", ");
+      const identityPlaceholder = `$${entries.length + 1}`;
+      const rows = await client.query<Record<string, unknown>>(
+        `UPDATE ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} SET ${assignments} WHERE ${quoteIdentifier(identity.column)} = ${identityPlaceholder} RETURNING *`,
+        [...entries.map(([, value]) => value), identity.value],
+      );
+      if (!rows[0]) {
+        throw new ProviderError("connection_failed", "The database row was not found for update.", {
+          provider: "supabase",
+          operation: "update database row",
+        });
+      }
+      return normalizeRow(rows[0], 0);
+    },
+    async deleteRow(table, identity): Promise<NormalizedRow> {
+      const reference = splitTableReference(table);
+      const rows = await client.query<Record<string, unknown>>(
+        `DELETE FROM ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} WHERE ${quoteIdentifier(identity.column)} = $1 RETURNING *`,
+        [identity.value],
+      );
+      if (!rows[0]) {
+        throw new ProviderError(
+          "connection_failed",
+          "The database row was not found for deletion.",
+          {
+            provider: "supabase",
+            operation: "delete database row",
+          },
+        );
+      }
+      return normalizeRow(rows[0], 0);
+    },
+  };
+}
+
 export class SupabaseProvider implements BackendProvider {
   readonly name = "supabase" as const;
   readonly services: ProviderServices;
   private capabilities = emptyCapabilities();
+  private databaseAvailable = false;
 
   constructor(
     private readonly credentials: SupabaseCredentials,
     private readonly client: SupabaseHttpClient = defaultHttpClient(),
+    private readonly databaseClient: SupabaseDatabaseClient | undefined = credentials.databaseUrl
+      ? defaultDatabaseClient(credentials.databaseUrl)
+      : undefined,
   ) {
     const auth: AuthProvider = {
       listUsers: (cursor) => this.listUsers(cursor),
@@ -214,11 +462,8 @@ export class SupabaseProvider implements BackendProvider {
     const storage: StorageProvider = {
       listFiles: (bucket, cursor) => this.listFiles(bucket, cursor),
     };
-    const database: DatabaseProvider | undefined = credentials.databaseUrl
-      ? {
-          listTables: async () => [],
-          listRows: async () => ({ items: [] }),
-        }
+    const database: DatabaseProvider | undefined = this.databaseClient
+      ? createDatabaseProvider(credentials.databaseUrl as string, this.databaseClient)
       : undefined;
     this.services = {
       auth,
@@ -228,7 +473,7 @@ export class SupabaseProvider implements BackendProvider {
   }
 
   async connect(): Promise<ProviderConnectionResult> {
-    const [auth, storage, metadata] = await Promise.all([
+    const [auth, storage, metadata, database] = await Promise.all([
       probe(
         this.client,
         `${this.credentials.projectUrl}/auth/v1/health`,
@@ -249,18 +494,32 @@ export class SupabaseProvider implements BackendProvider {
             "check Supabase project metadata access",
           )
         : Promise.resolve({ ok: false, permissionMissing: false }),
+      this.databaseClient
+        ? this.databaseClient
+            .query("SELECT 1 AS ok")
+            .then(() => ({ ok: true, permissionMissing: false }))
+            .catch(() => ({ ok: false, permissionMissing: false }))
+        : Promise.resolve({ ok: false, permissionMissing: false }),
     ]);
+
+    this.databaseAvailable = database.ok;
 
     this.capabilities = {
       ...emptyCapabilities(),
       projectMetadata: metadata.ok,
-      relationalDatabase: Boolean(this.credentials.databaseUrl),
-      sql: Boolean(this.credentials.databaseUrl),
+      relationalDatabase: database.ok,
+      sql: database.ok,
       auth: auth.ok,
       storage: storage.ok,
     };
 
-    const successfulProbes = [auth.ok, storage.ok, metadata.ok].filter(Boolean).length;
+    const probes = [
+      auth,
+      storage,
+      ...(this.credentials.managementApiToken ? [metadata] : []),
+      ...(this.databaseClient ? [database] : []),
+    ];
+    const successfulProbes = probes.filter((probeResult) => probeResult.ok).length;
     const checkedAt = new Date().toISOString();
     if (successfulProbes === 0) {
       return {
@@ -272,16 +531,16 @@ export class SupabaseProvider implements BackendProvider {
             : "unavailable",
       };
     }
+    const healthy = successfulProbes === probes.length;
     return {
-      state:
-        successfulProbes === 3 || (successfulProbes === 2 && !metadata.ok) ? "healthy" : "degraded",
+      state: healthy ? "healthy" : "degraded",
       checkedAt,
-      ...(successfulProbes < 3 ? { reason: "partial_capabilities" } : {}),
+      ...(healthy ? {} : { reason: "partial_capabilities" }),
     };
   }
 
   async disconnect(): Promise<void> {
-    // Supabase connections are request-scoped; there is no client socket to close.
+    await this.databaseClient?.end();
   }
 
   async testConnection(): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -322,6 +581,10 @@ export class SupabaseProvider implements BackendProvider {
       !this.capabilities.projectMetadata
     ) {
       await this.connect();
+    }
+    if (this.databaseClient && !this.databaseAvailable) {
+      this.capabilities.relationalDatabase = false;
+      this.capabilities.sql = false;
     }
     return this.capabilities;
   }

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { capabilityIsAvailable, filterItems, paginateItems, type CapabilityKey } from "@foundry/ui";
 import { SupabaseConnectionWizard } from "@/components/supabase-connection-wizard";
+import { DatabaseExplorer } from "@/components/database-explorer";
 import {
   buildControlCenterSummary,
   formatBytes,
@@ -719,6 +720,13 @@ export function DashboardShell({
                   </span>
                 ))}
               </div>
+              {capabilities.database || capabilities.relationalDatabase || capabilities.sql ? (
+                <DatabaseExplorer projectId={selectedProject.id} />
+              ) : (
+                <div className="foundry-database-empty foundry-database-empty-inset">
+                  Database browsing is unavailable until a database credential is checked.
+                </div>
+              )}
             </section>
           ) : null}
 

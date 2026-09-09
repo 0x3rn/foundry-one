@@ -1116,6 +1116,144 @@ kbd {
   border-radius: 50%;
   background: currentColor;
 }
+.foundry-database-explorer {
+  border-top: 1px solid var(--line);
+}
+.foundry-database-header,
+.foundry-database-detail-header,
+.foundry-database-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.foundry-database-header {
+  padding: 18px 25px 12px;
+}
+.foundry-database-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+.foundry-database-grid {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 25px 20px;
+}
+.foundry-database-table-list {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  max-height: 245px;
+  overflow: auto;
+}
+.foundry-database-table-list button {
+  display: grid;
+  gap: 1px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+}
+.foundry-database-table-list button:hover,
+.foundry-database-table-list button.is-selected {
+  background: var(--panel-muted);
+  color: var(--ink);
+}
+.foundry-database-table-list button.is-selected {
+  box-shadow: inset 3px 0 var(--amber);
+}
+.foundry-database-table-list small {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.foundry-database-detail {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.foundry-database-detail-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.foundry-database-detail-header strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.foundry-database-detail-header span,
+.foundry-database-footer {
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-database-table-wrap {
+  max-height: 210px;
+  overflow: auto;
+}
+.foundry-database-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.foundry-database-table-wrap th,
+.foundry-database-table-wrap td {
+  max-width: 180px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.foundry-database-table-wrap th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-muted);
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.foundry-database-table-wrap td {
+  color: var(--ink-faint);
+}
+.foundry-database-footer {
+  padding: 9px 12px;
+}
+.foundry-database-footer button {
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-size: 9px;
+  cursor: pointer;
+}
+.foundry-database-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.foundry-database-empty,
+.foundry-database-error {
+  margin: 0;
+  padding: 14px 25px 20px;
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+.foundry-database-empty-inset {
+  border-top: 1px solid var(--line);
+}
+.foundry-database-error {
+  color: var(--danger);
+}
 .foundry-surface-panel {
   padding-bottom: 24px;
 }
@@ -1653,6 +1791,19 @@ kbd {
     grid-template-columns: 1fr;
     padding-right: 17px;
     padding-left: 17px;
+  }
+  .foundry-database-header {
+    padding-right: 17px;
+    padding-left: 17px;
+  }
+  .foundry-database-grid {
+    grid-template-columns: 1fr;
+    padding-right: 17px;
+    padding-left: 17px;
+  }
+  .foundry-database-table-list {
+    grid-template-columns: repeat(2, 1fr);
+    max-height: 150px;
   }
   .foundry-feature-card {
     min-height: 145px;

@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   createSupabaseProvider,
   parseSupabaseCredentials,
+  SupabaseProvider,
   SupabaseCredentialError,
+  type SupabaseDatabaseClient,
   type SupabaseHttpClient,
 } from "@foundry/providers-supabase";
 import { ProviderError } from "@foundry/providers-core";
@@ -141,4 +143,91 @@ test("Supabase adapter normalizes permission and unavailable errors without secr
     }),
   );
   assert.equal((await disconnected.connect()).state, "disconnected");
+});
+
+test("Supabase database adapter introspects safely and paginates rows", async () => {
+  const rows = Array.from({ length: 51 }, (_, index) => ({
+    id: index + 1,
+    label: `row-${index + 1}`,
+  }));
+  const database: SupabaseDatabaseClient = {
+    async query(query) {
+      if (query.includes("information_schema.tables")) {
+        return [{ schema_name: "public", table_name: "orders", table_type: "BASE TABLE" }];
+      }
+      if (query.includes("information_schema.columns")) {
+        return [
+          {
+            column_name: "id",
+            data_type: "integer",
+            is_nullable: "NO",
+            column_default: "nextval('orders_id_seq'::regclass)",
+            is_identity: "YES",
+            is_primary_key: true,
+          },
+        ];
+      }
+      if (query.includes("SELECT 1 AS ok")) return [];
+      return rows;
+    },
+    async end() {},
+  };
+  const provider = new SupabaseProvider(
+    parseSupabaseCredentials({
+      ...credentials,
+      managementApiToken: undefined,
+      databaseUrl: "postgresql://db.example/foundry",
+    }),
+    clientFor({
+      "https://foundry.supabase.co/auth/v1/health": { status: 200 },
+      "https://foundry.supabase.co/storage/v1/bucket": { status: 200 },
+    }),
+    database,
+  );
+
+  assert.equal((await provider.connect()).state, "healthy");
+  const tables = await provider.services.database?.listTables();
+  assert.deepEqual(tables?.[0], {
+    id: "public.orders",
+    name: "orders",
+    schema: "public",
+    kind: "table",
+    isView: false,
+  });
+  assert.deepEqual(await provider.services.database?.listColumns?.("public.orders"), [
+    {
+      id: "public.orders.id",
+      name: "id",
+      dataType: "integer",
+      nullable: false,
+      defaultValue: "nextval('orders_id_seq'::regclass)",
+      isPrimaryKey: true,
+      isIdentity: true,
+    },
+  ]);
+  const page = await provider.services.database?.listRows("public.orders");
+  assert.equal(page?.items.length, 50);
+  assert.equal(page?.nextCursor, "50");
+  const inserted = await provider.services.database?.insertRow?.("public.orders", { label: "new" });
+  assert.equal(inserted?.values.label, "row-1");
+  const updated = await provider.services.database?.updateRow?.(
+    "public.orders",
+    { column: "id", value: 1 },
+    { label: "updated" },
+  );
+  assert.equal(updated?.values.id, 1);
+  const deleted = await provider.services.database?.deleteRow?.("public.orders", {
+    column: "id",
+    value: 1,
+  });
+  assert.equal(deleted?.values.id, 1);
+  await assert.rejects(
+    () => provider.services.database?.insertRow?.("public.orders", {}),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
+  await assert.rejects(
+    () => provider.services.database?.listRows("public.orders;DROP TABLE users"),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
+  await provider.disconnect();
 });

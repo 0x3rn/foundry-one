@@ -32,6 +32,17 @@ export interface NormalizedTable {
   readonly kind: "table" | "collection" | "realtime";
   readonly schema?: string;
   readonly rowCount?: number;
+  readonly isView?: boolean;
+}
+
+export interface NormalizedColumn {
+  readonly id: string;
+  readonly name: string;
+  readonly dataType: string;
+  readonly nullable: boolean;
+  readonly defaultValue?: string;
+  readonly isPrimaryKey: boolean;
+  readonly isIdentity: boolean;
 }
 
 export interface NormalizedRow {
@@ -85,6 +96,17 @@ export interface NormalizedFinding {
 export interface DatabaseProvider {
   listTables(): Promise<readonly NormalizedTable[]>;
   listRows(table: string, cursor?: string): Promise<ProviderPage<NormalizedRow>>;
+  listColumns?(table: string): Promise<readonly NormalizedColumn[]>;
+  insertRow?(table: string, values: ProviderRecord): Promise<NormalizedRow>;
+  updateRow?(
+    table: string,
+    identity: { readonly column: string; readonly value: ProviderScalar },
+    values: ProviderRecord,
+  ): Promise<NormalizedRow>;
+  deleteRow?(
+    table: string,
+    identity: { readonly column: string; readonly value: ProviderScalar },
+  ): Promise<NormalizedRow>;
 }
 
 export interface AuthProvider {
