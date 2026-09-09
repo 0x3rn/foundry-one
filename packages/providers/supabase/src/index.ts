@@ -6,6 +6,9 @@ import type {
   BackendProvider,
   BackendProviderFactory,
   DatabaseConstraint,
+  DatabaseCatalog,
+  DatabaseExtension,
+  DatabaseFunction,
   DatabaseIndex,
   DatabaseRelation,
   DatabaseRowQuery,
@@ -360,6 +363,45 @@ function createDatabaseProvider(
         isPrimaryKey: row.is_primary_key,
         isIdentity: row.is_identity === "YES",
       }));
+    },
+    async describeCatalog(): Promise<DatabaseCatalog> {
+      const [functions, extensions] = await Promise.all([
+        client.query<{
+          oid: number;
+          schema_name: string;
+          function_name: string;
+          return_type: string;
+          language_name: string;
+        }>(
+          `SELECT p.oid, n.nspname AS schema_name, p.proname AS function_name,
+                  pg_get_function_result(p.oid) AS return_type, l.lanname AS language_name
+           FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+           JOIN pg_language l ON l.oid = p.prolang
+           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+           ORDER BY n.nspname, p.proname, p.oid`,
+        ),
+        client.query<{ extname: string; extversion: string }>(
+          `SELECT extname, extversion
+           FROM pg_extension
+           ORDER BY extname`,
+        ),
+      ]);
+      return {
+        functions: functions.map(
+          (item) =>
+            ({
+              id: `${item.schema_name}.${item.function_name}.${item.oid}`,
+              schema: item.schema_name,
+              name: item.function_name,
+              returnType: item.return_type,
+              language: item.language_name,
+            }) satisfies DatabaseFunction,
+        ),
+        extensions: extensions.map(
+          (item) => ({ name: item.extname, version: item.extversion }) satisfies DatabaseExtension,
+        ),
+      };
     },
     async describeTable(table): Promise<DatabaseTableDetails> {
       const reference = splitTableReference(table);

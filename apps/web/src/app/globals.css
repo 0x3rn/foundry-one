@@ -1154,6 +1154,18 @@ kbd {
   color: var(--ink-faint);
   font-size: 9px;
 }
+.foundry-database-catalog {
+  display: flex;
+  gap: 6px;
+  padding: 0 25px 10px;
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-database-catalog span {
+  padding: 3px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
 .foundry-database-toolbar label {
   display: grid;
   gap: 4px;

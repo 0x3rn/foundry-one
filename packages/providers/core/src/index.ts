@@ -51,6 +51,24 @@ export interface DatabaseTableDetails {
   readonly triggers: readonly string[];
 }
 
+export interface DatabaseFunction {
+  readonly id: string;
+  readonly schema: string;
+  readonly name: string;
+  readonly returnType: string;
+  readonly language: string;
+}
+
+export interface DatabaseExtension {
+  readonly name: string;
+  readonly version: string;
+}
+
+export interface DatabaseCatalog {
+  readonly functions: readonly DatabaseFunction[];
+  readonly extensions: readonly DatabaseExtension[];
+}
+
 export interface NormalizedUser {
   readonly id: string;
   readonly email: string;
@@ -136,6 +154,7 @@ export interface DatabaseProvider {
   listRows(table: string, query?: DatabaseRowQuery | string): Promise<ProviderPage<NormalizedRow>>;
   listColumns?(table: string): Promise<readonly NormalizedColumn[]>;
   describeTable?(table: string): Promise<DatabaseTableDetails>;
+  describeCatalog?(): Promise<DatabaseCatalog>;
   insertRow?(table: string, values: ProviderRecord): Promise<NormalizedRow>;
   updateRow?(
     table: string,

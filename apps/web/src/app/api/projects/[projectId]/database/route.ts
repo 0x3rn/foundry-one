@@ -36,7 +36,7 @@ function requestId(request: Request): string {
 }
 
 function parseResource(request: Request): {
-  readonly resource: "tables" | "columns" | "rows" | "details";
+  readonly resource: "tables" | "columns" | "rows" | "details" | "catalog";
   readonly table?: string;
   readonly query?: DatabaseRowQuery;
 } {
@@ -46,12 +46,15 @@ function parseResource(request: Request): {
     resource !== "tables" &&
     resource !== "columns" &&
     resource !== "rows" &&
-    resource !== "details"
+    resource !== "details" &&
+    resource !== "catalog"
   ) {
-    throw new SupabaseCredentialError("resource must be tables, columns, rows, or details.");
+    throw new SupabaseCredentialError(
+      "resource must be tables, columns, rows, details, or catalog.",
+    );
   }
   const table = url.searchParams.get("table")?.trim() || undefined;
-  if (resource !== "tables" && !table) {
+  if (resource !== "tables" && resource !== "catalog" && !table) {
     throw new SupabaseCredentialError("table is required for column, detail, and row reads.");
   }
   const cursor = url.searchParams.get("cursor") ?? undefined;
@@ -256,6 +259,8 @@ export async function GET(
             );
           }
           if (resource.resource === "tables") return service.listTables();
+          if (resource.resource === "catalog")
+            return service.describeCatalog?.() ?? { functions: [], extensions: [] };
           if (resource.resource === "columns")
             return service.listColumns?.(resource.table as string) ?? [];
           if (resource.resource === "details")

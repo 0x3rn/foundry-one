@@ -47,6 +47,17 @@ interface DatabaseTableDetails {
   readonly triggers: readonly string[];
 }
 
+interface DatabaseCatalog {
+  readonly functions: readonly {
+    readonly id: string;
+    readonly schema: string;
+    readonly name: string;
+    readonly returnType: string;
+    readonly language: string;
+  }[];
+  readonly extensions: readonly { readonly name: string; readonly version: string }[];
+}
+
 interface DatabaseRow {
   readonly id: string;
   readonly values: Readonly<Record<string, string | number | boolean | null | string[]>>;
@@ -72,6 +83,7 @@ async function readApi<T>(url: string): Promise<T> {
 
 export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [tables, setTables] = useState<readonly DatabaseTable[]>([]);
+  const [catalog, setCatalog] = useState<DatabaseCatalog>();
   const [selectedTable, setSelectedTable] = useState<string>();
   const [columns, setColumns] = useState<readonly DatabaseColumn[]>([]);
   const [details, setDetails] = useState<DatabaseTableDetails>();
@@ -94,10 +106,14 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
 
   useEffect(() => {
     let active = true;
-    readApi<readonly DatabaseTable[]>(`/api/projects/${projectId}/database?resource=tables`)
-      .then((result) => {
+    Promise.all([
+      readApi<readonly DatabaseTable[]>(`/api/projects/${projectId}/database?resource=tables`),
+      readApi<DatabaseCatalog>(`/api/projects/${projectId}/database?resource=catalog`),
+    ])
+      .then(([result, nextCatalog]) => {
         if (!active) return;
         setTables(result);
+        setCatalog(nextCatalog);
         setSelectedTable((current) => current ?? result[0]?.id);
       })
       .catch((caught: unknown) => {
@@ -330,6 +346,12 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         </div>
         <span className="foundry-project-tag">server-side read</span>
       </div>
+      {catalog ? (
+        <div className="foundry-database-catalog" aria-label="Database catalog summary">
+          <span>{catalog.functions.length} functions</span>
+          <span>{catalog.extensions.length} extensions</span>
+        </div>
+      ) : null}
       <form className="foundry-database-toolbar" onSubmit={submitSearch}>
         <label>
           Search rows

@@ -155,6 +155,20 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
       if (query.includes("information_schema.tables")) {
         return [{ schema_name: "public", table_name: "orders", table_type: "BASE TABLE" }];
       }
+      if (query.includes("FROM pg_proc")) {
+        return [
+          {
+            oid: 42,
+            schema_name: "public",
+            function_name: "recalculate_total",
+            return_type: "trigger",
+            language_name: "plpgsql",
+          },
+        ];
+      }
+      if (query.includes("FROM pg_extension")) {
+        return [{ extname: "pgcrypto", extversion: "1.3" }];
+      }
       if (query.includes("information_schema.columns")) {
         return [
           {
@@ -213,6 +227,18 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     schema: "public",
     kind: "table",
     isView: false,
+  });
+  assert.deepEqual(await provider.services.database?.describeCatalog?.(), {
+    functions: [
+      {
+        id: "public.recalculate_total.42",
+        schema: "public",
+        name: "recalculate_total",
+        returnType: "trigger",
+        language: "plpgsql",
+      },
+    ],
+    extensions: [{ name: "pgcrypto", version: "1.3" }],
   });
   assert.deepEqual(await provider.services.database?.listColumns?.("public.orders"), [
     {
