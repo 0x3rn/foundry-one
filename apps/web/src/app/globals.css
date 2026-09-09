@@ -1239,6 +1239,20 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.foundry-database-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-database-metadata span {
+  padding: 3px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
 .foundry-database-detail-header span,
 .foundry-database-footer {
   color: var(--ink-faint);

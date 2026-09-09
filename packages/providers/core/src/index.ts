@@ -24,6 +24,33 @@ export interface DatabaseRowQuery {
   readonly sortDirection?: "asc" | "desc";
 }
 
+export interface DatabaseIndex {
+  readonly name: string;
+  readonly definition: string;
+  readonly isUnique: boolean;
+  readonly isPrimary: boolean;
+}
+
+export interface DatabaseConstraint {
+  readonly name: string;
+  readonly type: "primary_key" | "foreign_key" | "unique" | "check" | "exclusion" | "other";
+  readonly definition: string;
+}
+
+export interface DatabaseRelation {
+  readonly name: string;
+  readonly columns: readonly string[];
+  readonly referencedTable: string;
+  readonly referencedColumns: readonly string[];
+}
+
+export interface DatabaseTableDetails {
+  readonly indexes: readonly DatabaseIndex[];
+  readonly constraints: readonly DatabaseConstraint[];
+  readonly relations: readonly DatabaseRelation[];
+  readonly triggers: readonly string[];
+}
+
 export interface NormalizedUser {
   readonly id: string;
   readonly email: string;
@@ -108,6 +135,7 @@ export interface DatabaseProvider {
   listTables(): Promise<readonly NormalizedTable[]>;
   listRows(table: string, query?: DatabaseRowQuery | string): Promise<ProviderPage<NormalizedRow>>;
   listColumns?(table: string): Promise<readonly NormalizedColumn[]>;
+  describeTable?(table: string): Promise<DatabaseTableDetails>;
   insertRow?(table: string, values: ProviderRecord): Promise<NormalizedRow>;
   updateRow?(
     table: string,

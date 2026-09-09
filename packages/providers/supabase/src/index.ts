@@ -5,7 +5,11 @@ import type {
   AuthProvider,
   BackendProvider,
   BackendProviderFactory,
+  DatabaseConstraint,
+  DatabaseIndex,
+  DatabaseRelation,
   DatabaseRowQuery,
+  DatabaseTableDetails,
   DatabaseProvider,
   NormalizedFile,
   NormalizedColumn,
@@ -356,6 +360,99 @@ function createDatabaseProvider(
         isPrimaryKey: row.is_primary_key,
         isIdentity: row.is_identity === "YES",
       }));
+    },
+    async describeTable(table): Promise<DatabaseTableDetails> {
+      const reference = splitTableReference(table);
+      const [indexes, constraints, relations, triggers] = await Promise.all([
+        client.query<{ indexname: string; indexdef: string }>(
+          `SELECT indexname, indexdef
+           FROM pg_indexes
+           WHERE schemaname = $1 AND tablename = $2
+           ORDER BY indexname`,
+          [reference.schema, reference.table],
+        ),
+        client.query<{ name: string; contype: string; definition: string }>(
+          `SELECT con.conname AS name, con.contype, pg_get_constraintdef(con.oid) AS definition
+           FROM pg_constraint con
+           JOIN pg_class rel ON rel.oid = con.conrelid
+           JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+           WHERE ns.nspname = $1 AND rel.relname = $2
+           ORDER BY con.conname`,
+          [reference.schema, reference.table],
+        ),
+        client.query<{
+          constraint_name: string;
+          column_name: string;
+          foreign_table_schema: string;
+          foreign_table_name: string;
+          foreign_column_name: string;
+        }>(
+          `SELECT k.constraint_name, k.column_name,
+                  c.table_schema AS foreign_table_schema,
+                  c.table_name AS foreign_table_name,
+                  c.column_name AS foreign_column_name
+           FROM information_schema.key_column_usage k
+           JOIN information_schema.referential_constraints r
+             ON r.constraint_name = k.constraint_name
+            AND r.constraint_schema = k.constraint_schema
+           JOIN information_schema.constraint_column_usage c
+             ON c.constraint_name = r.unique_constraint_name
+            AND c.constraint_schema = r.unique_constraint_schema
+           WHERE k.table_schema = $1 AND k.table_name = $2
+           ORDER BY k.constraint_name, k.ordinal_position`,
+          [reference.schema, reference.table],
+        ),
+        client.query<{ trigger_name: string }>(
+          `SELECT trigger_name
+           FROM information_schema.triggers
+           WHERE event_object_schema = $1 AND event_object_table = $2
+           ORDER BY trigger_name`,
+          [reference.schema, reference.table],
+        ),
+      ]);
+      const constraintType = (type: string): DatabaseConstraint["type"] =>
+        (({ p: "primary_key", f: "foreign_key", u: "unique", c: "check", x: "exclusion" })[
+          type
+        ] as DatabaseConstraint["type"]) ?? "other";
+      const groupedRelations = new Map<
+        string,
+        { columns: string[]; referencedTable: string; referencedColumns: string[] }
+      >();
+      for (const relation of relations) {
+        const current = groupedRelations.get(relation.constraint_name) ?? {
+          columns: [],
+          referencedTable: `${relation.foreign_table_schema}.${relation.foreign_table_name}`,
+          referencedColumns: [],
+        };
+        current.columns.push(relation.column_name);
+        current.referencedColumns.push(relation.foreign_column_name);
+        groupedRelations.set(relation.constraint_name, current);
+      }
+      const primaryIndexNames = new Set(
+        constraints
+          .filter((constraint) => constraint.contype === "p")
+          .map((constraint) => constraint.name),
+      );
+      return {
+        indexes: indexes.map(
+          (index) =>
+            ({
+              name: index.indexname,
+              definition: index.indexdef,
+              isUnique: /UNIQUE INDEX/i.test(index.indexdef),
+              isPrimary: primaryIndexNames.has(index.indexname),
+            }) satisfies DatabaseIndex,
+        ),
+        constraints: constraints.map((constraint) => ({
+          name: constraint.name,
+          type: constraintType(constraint.contype),
+          definition: constraint.definition,
+        })),
+        relations: [...groupedRelations.entries()].map(
+          ([name, relation]) => ({ name, ...relation }) satisfies DatabaseRelation,
+        ),
+        triggers: triggers.map((trigger) => trigger.trigger_name),
+      };
     },
     async listRows(table, query): Promise<ProviderPage<NormalizedRow>> {
       const reference = splitTableReference(table);

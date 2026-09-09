@@ -26,6 +26,27 @@ interface DatabaseColumn {
   readonly isIdentity: boolean;
 }
 
+interface DatabaseTableDetails {
+  readonly indexes: readonly {
+    readonly name: string;
+    readonly definition: string;
+    readonly isUnique: boolean;
+    readonly isPrimary: boolean;
+  }[];
+  readonly constraints: readonly {
+    readonly name: string;
+    readonly type: string;
+    readonly definition: string;
+  }[];
+  readonly relations: readonly {
+    readonly name: string;
+    readonly columns: readonly string[];
+    readonly referencedTable: string;
+    readonly referencedColumns: readonly string[];
+  }[];
+  readonly triggers: readonly string[];
+}
+
 interface DatabaseRow {
   readonly id: string;
   readonly values: Readonly<Record<string, string | number | boolean | null | string[]>>;
@@ -53,6 +74,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [tables, setTables] = useState<readonly DatabaseTable[]>([]);
   const [selectedTable, setSelectedTable] = useState<string>();
   const [columns, setColumns] = useState<readonly DatabaseColumn[]>([]);
+  const [details, setDetails] = useState<DatabaseTableDetails>();
   const [rows, setRows] = useState<readonly DatabaseRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
   const [searchInput, setSearchInput] = useState("");
@@ -99,13 +121,17 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       readApi<readonly DatabaseColumn[]>(
         `/api/projects/${projectId}/database?resource=columns&table=${encodeURIComponent(selectedTable)}`,
       ),
+      readApi<DatabaseTableDetails>(
+        `/api/projects/${projectId}/database?resource=details&table=${encodeURIComponent(selectedTable)}`,
+      ),
       readApi<{ items: readonly DatabaseRow[]; nextCursor?: string }>(
         buildRowsUrl(projectId, selectedTable, { search, sortColumn, sortDirection }),
       ),
     ])
-      .then(([nextColumns, page]) => {
+      .then(([nextColumns, nextDetails, page]) => {
         if (!active) return;
         setColumns(nextColumns);
+        setDetails(nextDetails);
         setRows(page.items);
         setNextCursor(page.nextCursor);
       })
@@ -351,6 +377,14 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
               <strong>{selectedTable}</strong>
               <span>{isTableLoading ? "Loading…" : `${rows.length} rows in page`}</span>
             </div>
+            {details ? (
+              <div className="foundry-database-metadata" aria-label="Table structure summary">
+                <span>Indexes {details.indexes.length}</span>
+                <span>Constraints {details.constraints.length}</span>
+                <span>Relations {details.relations.length}</span>
+                <span>Triggers {details.triggers.length}</span>
+              </div>
+            ) : null}
             <div className="foundry-database-table-wrap">
               <table>
                 <thead>

@@ -167,6 +167,23 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
           },
         ];
       }
+      if (query.includes("FROM pg_indexes")) {
+        return [
+          {
+            indexname: "orders_pkey",
+            indexdef: "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)",
+          },
+        ];
+      }
+      if (query.includes("FROM pg_constraint")) {
+        return [{ name: "orders_pkey", contype: "p", definition: "PRIMARY KEY (id)" }];
+      }
+      if (query.includes("information_schema.referential_constraints")) {
+        return [];
+      }
+      if (query.includes("information_schema.triggers")) {
+        return [{ trigger_name: "orders_updated_at" }];
+      }
       if (query.includes("information_schema.key_column_usage")) {
         return [{ column_name: "id" }];
       }
@@ -208,6 +225,19 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
       isIdentity: true,
     },
   ]);
+  assert.deepEqual(await provider.services.database?.describeTable?.("public.orders"), {
+    indexes: [
+      {
+        name: "orders_pkey",
+        definition: "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)",
+        isUnique: true,
+        isPrimary: true,
+      },
+    ],
+    constraints: [{ name: "orders_pkey", type: "primary_key", definition: "PRIMARY KEY (id)" }],
+    relations: [],
+    triggers: ["orders_updated_at"],
+  });
   const page = await provider.services.database?.listRows("public.orders");
   assert.equal(page?.items.length, 50);
   assert.equal(page?.nextCursor, "50");
