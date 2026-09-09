@@ -67,11 +67,13 @@ async function run(): Promise<void> {
   const registrationPageBody = await registrationPage.text();
   assert.match(registrationPageBody, /Create your account/);
   assert.match(registrationPageBody, /Confirm password/);
+  assert.match(registrationPageBody, /Show password/);
 
   const loginPage = await request("/login");
   await assertStatus(loginPage, 200, "login page");
   const loginPageBody = await loginPage.text();
   assert.match(loginPageBody, /Create an account/);
+  assert.match(loginPageBody, /Show password/);
 
   const signUp = await request("/api/auth/sign-up/email", {
     method: "POST",

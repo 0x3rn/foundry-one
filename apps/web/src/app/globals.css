@@ -1756,6 +1756,46 @@ kbd {
 .foundry-login-card input:hover {
   border-color: var(--ink-soft);
 }
+.foundry-password-field {
+  position: relative;
+  display: block;
+}
+.foundry-password-field input {
+  padding-right: 46px;
+}
+.foundry-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  transform: translateY(-50%);
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.foundry-password-toggle:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+.foundry-password-toggle:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.foundry-password-toggle svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
 .foundry-login-button {
   width: 100%;
   min-height: 44px;

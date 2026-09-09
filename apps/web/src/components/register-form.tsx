@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { PasswordField } from "@/components/password-field";
 
 interface AuthErrorBody {
   readonly message?: string;
@@ -123,32 +124,26 @@ export function RegisterForm() {
                 required
               />
             </label>
-            <label htmlFor="password">
-              Password
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                minLength={8}
-              />
-            </label>
-            <label htmlFor="confirm-password">
-              Confirm password
-              <input
-                id="confirm-password"
-                name="confirmPassword"
-                type="password"
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                required
-                minLength={8}
-              />
-            </label>
+            <PasswordField
+              id="password"
+              name="password"
+              label="Password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              minLength={8}
+            />
+            <PasswordField
+              id="confirm-password"
+              name="confirmPassword"
+              label="Confirm password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              required
+              minLength={8}
+            />
             {error ? (
               <p className="foundry-form-error" role="alert">
                 {error}

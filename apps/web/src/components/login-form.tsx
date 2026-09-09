@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { PasswordField } from "@/components/password-field";
 
 export function LoginForm() {
   const router = useRouter();
@@ -79,19 +80,16 @@ export function LoginForm() {
                 required
               />
             </label>
-            <label htmlFor="password">
-              Password
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                minLength={8}
-              />
-            </label>
+            <PasswordField
+              id="password"
+              name="password"
+              label="Password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              minLength={8}
+            />
             {error ? (
               <p className="foundry-form-error" role="alert">
                 {error}
