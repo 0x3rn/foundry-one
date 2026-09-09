@@ -269,6 +269,20 @@ model Credential {
   providerConnection   ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Cascade)
 }
 
+model DatabaseConfirmationChallenge {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  projectId    String
+  actorUserId  String
+  action       String
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([workspaceId, projectId, actorUserId, action, expiresAt])
+}
+
 model AuditLog {
   id           String    @id @default(cuid())
   workspaceId  String

@@ -64,6 +64,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [isTableLoading, setIsTableLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
@@ -248,6 +249,52 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     }
   }
 
+  async function deleteRow(row: DatabaseRow) {
+    if (!selectedTable || !row.identity) return;
+    setIsDeleting(true);
+    setError(undefined);
+    try {
+      const prepareResponse = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "prepare-delete",
+          table: selectedTable,
+          identity: row.identity,
+        }),
+      });
+      const prepared = (await prepareResponse.json()) as ApiResponse<{ token: string }>;
+      if (!prepareResponse.ok || !prepared.data) {
+        throw new Error(
+          prepared.error?.message ?? "A deletion confirmation could not be prepared.",
+        );
+      }
+      const confirmed = window.confirm(
+        `Delete ${selectedTable} where ${row.identity.column} = ${String(row.identity.value)}? This cannot be undone.`,
+      );
+      if (!confirmed) return;
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "delete",
+          table: selectedTable,
+          identity: row.identity,
+          confirmationToken: prepared.data.token,
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<DatabaseRow>;
+      if (!response.ok || !body.data) {
+        throw new Error(body.error?.message ?? "The row could not be deleted.");
+      }
+      setRows((current) => current.filter((candidate) => candidate.id !== row.id));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The row could not be deleted.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   return (
     <div className="foundry-database-explorer">
       <div className="foundry-database-header">
@@ -364,9 +411,18 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                             </button>
                           </span>
                         ) : row.identity ? (
-                          <button type="button" onClick={() => startEditing(row)}>
-                            Edit
-                          </button>
+                          <span className="foundry-database-row-actions">
+                            <button type="button" onClick={() => startEditing(row)}>
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isDeleting}
+                              onClick={() => deleteRow(row)}
+                            >
+                              Delete
+                            </button>
+                          </span>
                         ) : (
                           <span title="This row has no stable single-column primary key.">
                             Read-only

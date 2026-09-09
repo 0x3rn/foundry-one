@@ -2,6 +2,10 @@ import { Prisma, PrismaClient } from "@prisma/client";
 
 export { Prisma, PrismaClient };
 export { PrismaAuditLogWriter } from "./audit-log-writer";
+export {
+  PrismaConfirmationChallengeStore,
+  ConfirmationChallengeError,
+} from "./confirmation-challenge-store";
 export { PrismaProviderConnectionStore } from "./provider-connection-store";
 
 export class DatabaseConfigurationError extends Error {

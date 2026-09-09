@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { AuthConfigurationError, getAuth, type AuthenticatedPrincipal } from "@foundry/auth";
 import {
+  ConfirmationChallengeError,
   createDatabaseClient,
   PrismaAuditLogWriter,
+  PrismaConfirmationChallengeStore,
   PrismaProviderConnectionStore,
 } from "@foundry/database";
 import { createKeyringFromEnvironment, CredentialVault, VaultError } from "@foundry/encryption";
@@ -82,17 +84,24 @@ function isProviderScalar(value: unknown): value is ProviderScalar {
 }
 
 function parseMutationBody(value: unknown): {
-  readonly operation: "insert" | "update" | "delete";
+  readonly operation: "insert" | "update" | "delete" | "prepare-delete";
   readonly table: string;
   readonly values?: ProviderRecord;
   readonly identity?: { readonly column: string; readonly value: ProviderScalar };
+  readonly confirmationToken?: string;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new SupabaseCredentialError("Database mutation input must be a JSON object.");
   }
   const body = value as Record<string, unknown>;
-  if (!(["insert", "update", "delete"] as readonly unknown[]).includes(body.operation)) {
-    throw new SupabaseCredentialError("operation must be insert, update, or delete.");
+  if (
+    !(["insert", "update", "delete", "prepare-delete"] as readonly unknown[]).includes(
+      body.operation,
+    )
+  ) {
+    throw new SupabaseCredentialError(
+      "operation must be insert, update, delete, or prepare-delete.",
+    );
   }
   if (typeof body.table !== "string" || !body.table.trim()) {
     throw new SupabaseCredentialError("table is required.");
@@ -123,8 +132,15 @@ function parseMutationBody(value: unknown): {
     throw new SupabaseCredentialError("identity must include a column and supported value.");
   }
   const normalizedIdentity = identity as Record<string, unknown> | undefined;
+  const confirmationToken = body.confirmationToken;
+  if (
+    confirmationToken !== undefined &&
+    (typeof confirmationToken !== "string" || confirmationToken.length > 256)
+  ) {
+    throw new SupabaseCredentialError("confirmationToken must be a short string when provided.");
+  }
   return {
-    operation: body.operation as "insert" | "update" | "delete",
+    operation: body.operation as "insert" | "update" | "delete" | "prepare-delete",
     table: body.table.trim(),
     ...(normalizedValues ? { values: normalizedValues } : {}),
     ...(normalizedIdentity
@@ -135,6 +151,7 @@ function parseMutationBody(value: unknown): {
           },
         }
       : {}),
+    ...(confirmationToken ? { confirmationToken } : {}),
   };
 }
 
@@ -295,20 +312,28 @@ export async function POST(
       return errorResponse("INVALID_JSON", "Request body must be valid JSON.", 400);
     }
     const input = parseMutationBody(body);
-    if (input.operation === "delete") {
+    if (
+      (input.operation === "update" ||
+        input.operation === "delete" ||
+        input.operation === "prepare-delete") &&
+      !input.identity
+    ) {
+      return errorResponse("IDENTITY_REQUIRED", "Updates require a stable row identity.", 400);
+    }
+    if (
+      (input.operation === "insert" || input.operation === "update") &&
+      (!input.values || Object.keys(input.values).length === 0)
+    ) {
+      return errorResponse("VALUES_REQUIRED", "At least one value is required.", 400);
+    }
+    if (input.operation === "delete" && !input.confirmationToken) {
       return errorResponse(
         "CONFIRMATION_REQUIRED",
-        "Row deletion requires an explicit confirmation flow and is not enabled from this endpoint yet.",
+        "A fresh deletion confirmation is required.",
         409,
       );
     }
-    if (input.operation === "update" && !input.identity) {
-      return errorResponse("IDENTITY_REQUIRED", "Updates require a stable row identity.", 400);
-    }
-    if (!input.values || Object.keys(input.values).length === 0) {
-      return errorResponse("VALUES_REQUIRED", "At least one value is required.", 400);
-    }
-    const values = input.values;
+    const values = input.values ?? {};
 
     const client = createDatabaseClient();
     database = client;
@@ -361,6 +386,8 @@ export async function POST(
     if (!storedConnection)
       return errorResponse("DATABASE_UNAVAILABLE", "The provider connection is unavailable.", 409);
     const vault = new CredentialVault(createKeyringFromEnvironment());
+    const confirmationStore = new PrismaConfirmationChallengeStore(client);
+    const action = input.operation === "delete" ? "row.delete" : `database.row.${input.operation}`;
 
     const data = await executeAuthorizedProjectAction(
       {
@@ -368,7 +395,19 @@ export async function POST(
         workspaceId: project.workspaceId,
         projectId: project.id,
         permission: "database.write",
-        action: `database.row.${input.operation}`,
+        action,
+        ...(input.operation === "delete"
+          ? {
+              expectedConfirmation: {
+                action: "row.delete" as const,
+                token: input.confirmationToken as string,
+              },
+              providedConfirmation: {
+                action: "row.delete" as const,
+                token: input.confirmationToken as string,
+              },
+            }
+          : {}),
         provider: "supabase",
         resourceType: "database_row",
         resourceId: input.identity?.column,
@@ -391,6 +430,14 @@ export async function POST(
               },
             );
           }
+          if (input.operation === "prepare-delete") {
+            return confirmationStore.create({
+              workspaceId: project.workspaceId,
+              projectId: project.id,
+              actorUserId: session.user.id,
+              action: "row.delete",
+            });
+          }
           if (input.operation === "insert") {
             if (!service.insertRow) {
               throw new ProviderError(
@@ -400,6 +447,26 @@ export async function POST(
               );
             }
             return service.insertRow(input.table, values);
+          }
+          if (input.operation === "delete") {
+            if (!service.deleteRow) {
+              throw new ProviderError(
+                "capability_unsupported",
+                "This connection does not support row deletion.",
+                { provider: "supabase", operation: "database.row.delete" },
+              );
+            }
+            await confirmationStore.claim({
+              workspaceId: project.workspaceId,
+              projectId: project.id,
+              actorUserId: session.user.id,
+              action: "row.delete",
+              token: input.confirmationToken as string,
+            });
+            return service.deleteRow(
+              input.table,
+              input.identity as NonNullable<typeof input.identity>,
+            );
           }
           if (!service.updateRow) {
             throw new ProviderError(
@@ -419,7 +486,7 @@ export async function POST(
       audit,
     );
 
-    return Response.json({ data }, { status: 201 });
+    return Response.json({ data }, { status: input.operation === "insert" ? 201 : 200 });
   } catch (error) {
     if (error instanceof AuthConfigurationError)
       return errorResponse(error.code, error.message, 503);
@@ -427,6 +494,8 @@ export async function POST(
       return errorResponse(error.code, error.message, 400);
     if (error instanceof VaultError)
       return errorResponse(error.code, "Credential encryption is not configured.", 503);
+    if (error instanceof ConfirmationChallengeError)
+      return errorResponse(error.code, error.message, 409);
     if (error instanceof AuthorizationError || error instanceof ProjectScopeError) {
       return errorResponse("FORBIDDEN", "You are not allowed to write this database.", 403);
     }
