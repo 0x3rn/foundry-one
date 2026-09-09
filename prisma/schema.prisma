@@ -256,6 +256,7 @@ model Credential {
   id                   String             @id @default(cuid())
   providerConnectionId String             @unique
   provider             ProviderName
+  connectionId         String
   algorithm            String
   keyVersion           Int
   iv                   String

@@ -5,6 +5,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
+    "@foundry/providers-core": "0.1.0",
     "@foundry/types": "0.1.0",
     "@prisma/client": "^6.12.0"
   },
