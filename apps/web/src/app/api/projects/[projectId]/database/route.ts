@@ -9,6 +9,7 @@ import { createKeyringFromEnvironment, CredentialVault, VaultError } from "@foun
 import {
   ProviderError,
   ProviderLifecycle,
+  type DatabaseRowQuery,
   type ProviderRecord,
   type ProviderScalar,
 } from "@foundry/providers-core";
@@ -35,7 +36,7 @@ function requestId(request: Request): string {
 function parseResource(request: Request): {
   readonly resource: "tables" | "columns" | "rows";
   readonly table?: string;
-  readonly cursor?: string;
+  readonly query?: DatabaseRowQuery;
 } {
   const url = new URL(request.url);
   const resource = url.searchParams.get("resource") ?? "tables";
@@ -46,10 +47,27 @@ function parseResource(request: Request): {
   if (resource !== "tables" && !table) {
     throw new SupabaseCredentialError("table is required for column and row reads.");
   }
+  const cursor = url.searchParams.get("cursor") ?? undefined;
+  const search = url.searchParams.get("search")?.trim() || undefined;
+  const sortColumn = url.searchParams.get("sortColumn")?.trim() || undefined;
+  const sortDirection = url.searchParams.get("sortDirection") ?? undefined;
+  if (sortDirection && sortDirection !== "asc" && sortDirection !== "desc") {
+    throw new SupabaseCredentialError("sortDirection must be asc or desc.");
+  }
+  const normalizedSortDirection = sortDirection as "asc" | "desc" | undefined;
   return {
     resource,
     ...(table ? { table } : {}),
-    cursor: url.searchParams.get("cursor") ?? undefined,
+    ...(cursor || search || sortColumn || sortDirection
+      ? {
+          query: {
+            ...(cursor ? { cursor } : {}),
+            ...(search ? { search } : {}),
+            ...(sortColumn ? { sortColumn } : {}),
+            ...(normalizedSortDirection ? { sortDirection: normalizedSortDirection } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -218,7 +236,7 @@ export async function GET(
           if (resource.resource === "tables") return service.listTables();
           if (resource.resource === "columns")
             return service.listColumns?.(resource.table as string) ?? [];
-          return service.listRows(resource.table as string, resource.cursor);
+          return service.listRows(resource.table as string, resource.query);
         },
       },
       scopeResolver,
@@ -373,13 +391,27 @@ export async function POST(
               },
             );
           }
-          if (input.operation === "insert") return service.insertRow?.(input.table, values) ?? null;
-          return (
-            service.updateRow?.(
-              input.table,
-              input.identity as NonNullable<typeof input.identity>,
-              values,
-            ) ?? null
+          if (input.operation === "insert") {
+            if (!service.insertRow) {
+              throw new ProviderError(
+                "capability_unsupported",
+                "This connection does not support row inserts.",
+                { provider: "supabase", operation: "database.row.insert" },
+              );
+            }
+            return service.insertRow(input.table, values);
+          }
+          if (!service.updateRow) {
+            throw new ProviderError(
+              "capability_unsupported",
+              "This connection does not support row updates.",
+              { provider: "supabase", operation: "database.row.update" },
+            );
+          }
+          return service.updateRow(
+            input.table,
+            input.identity as NonNullable<typeof input.identity>,
+            values,
           );
         },
       },

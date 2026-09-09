@@ -5,6 +5,7 @@ import type {
   AuthProvider,
   BackendProvider,
   BackendProviderFactory,
+  DatabaseRowQuery,
   DatabaseProvider,
   NormalizedFile,
   NormalizedColumn,
@@ -15,6 +16,7 @@ import type {
   ProviderPage,
   ProviderProjectMetadata,
   ProviderServices,
+  ProviderScalar,
   StorageProvider,
 } from "@foundry/providers-core";
 import { ProviderError } from "@foundry/providers-core";
@@ -266,15 +268,32 @@ function normalizeRowValue(value: unknown): string | number | boolean | null | s
   return JSON.stringify(value);
 }
 
-function normalizeRow(row: Record<string, unknown>, index: number): NormalizedRow {
+function normalizeRow(
+  row: Record<string, unknown>,
+  index: number,
+  identityColumn?: string,
+): NormalizedRow {
   const values = Object.fromEntries(
     Object.entries(row).map(([key, value]) => [key, normalizeRowValue(value)]),
   );
-  const stableId = Object.entries(row).find(([key]) => key === "id" || key.endsWith("_id"))?.[1];
+  const stableId = identityColumn ? row[identityColumn] : undefined;
+  const normalizedIdentity = stableId === undefined ? undefined : normalizeRowValue(stableId);
+  const hasScalarIdentity =
+    normalizedIdentity === null ||
+    typeof normalizedIdentity === "string" ||
+    typeof normalizedIdentity === "number" ||
+    typeof normalizedIdentity === "boolean";
   return {
     id: stableId === undefined ? `row-${index}` : String(stableId),
     values,
+    ...(identityColumn && hasScalarIdentity
+      ? { identity: { column: identityColumn, value: normalizedIdentity as ProviderScalar } }
+      : {}),
   };
+}
+
+function normalizeRowQuery(query?: DatabaseRowQuery | string): DatabaseRowQuery {
+  return typeof query === "string" ? { cursor: query } : (query ?? {});
 }
 
 function createDatabaseProvider(
@@ -338,9 +357,11 @@ function createDatabaseProvider(
         isIdentity: row.is_identity === "YES",
       }));
     },
-    async listRows(table, cursor): Promise<ProviderPage<NormalizedRow>> {
+    async listRows(table, query): Promise<ProviderPage<NormalizedRow>> {
       const reference = splitTableReference(table);
       const pageSize = 50;
+      const normalizedQuery = normalizeRowQuery(query);
+      const cursor = normalizedQuery.cursor;
       const offset = cursor ? Number.parseInt(cursor, 10) : 0;
       if (!Number.isInteger(offset) || offset < 0) {
         throw new ProviderError(
@@ -352,13 +373,55 @@ function createDatabaseProvider(
           },
         );
       }
+      const search = normalizedQuery.search?.trim();
+      if (search && search.length > 120) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "The row search must be 120 characters or fewer.",
+          { provider: "supabase", operation: "list database rows" },
+        );
+      }
+      const sortColumn = normalizedQuery.sortColumn?.trim();
+      if (sortColumn) quoteIdentifier(sortColumn);
+      const sortDirection = normalizedQuery.sortDirection ?? "asc";
+      if (sortDirection !== "asc" && sortDirection !== "desc") {
+        throw new ProviderError(
+          "invalid_configuration",
+          "The row sort direction must be asc or desc.",
+          { provider: "supabase", operation: "list database rows" },
+        );
+      }
+      const primaryKeyRows = await client.query<{ column_name: string }>(
+        `SELECT k.column_name
+         FROM information_schema.key_column_usage k
+         JOIN information_schema.table_constraints tc
+           ON tc.constraint_name = k.constraint_name
+          AND tc.table_schema = k.table_schema
+          AND tc.table_name = k.table_name
+         WHERE k.table_schema = $1 AND k.table_name = $2
+           AND tc.constraint_type = 'PRIMARY KEY'
+         ORDER BY k.ordinal_position`,
+        [reference.schema, reference.table],
+      );
+      const identityColumn =
+        primaryKeyRows.length === 1 ? primaryKeyRows[0]?.column_name : undefined;
+      const where = search ? "WHERE to_jsonb(t)::text ILIKE $1" : "";
+      const parameterOffset = search ? 2 : 1;
+      const parameters: unknown[] = search
+        ? [`%${search}%`, pageSize + 1, offset]
+        : [pageSize + 1, offset];
+      const orderBy = sortColumn
+        ? `ORDER BY ${quoteIdentifier(sortColumn)} ${sortDirection.toUpperCase()}`
+        : "";
       const rows = await client.query<Record<string, unknown>>(
-        `SELECT * FROM ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} LIMIT $1 OFFSET $2`,
-        [pageSize + 1, offset],
+        `SELECT t.* FROM ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} AS t ${where} ${orderBy} LIMIT $${parameterOffset} OFFSET $${parameterOffset + 1}`,
+        parameters,
       );
       const hasNextPage = rows.length > pageSize;
       return {
-        items: rows.slice(0, pageSize).map((row, index) => normalizeRow(row, offset + index)),
+        items: rows
+          .slice(0, pageSize)
+          .map((row, index) => normalizeRow(row, offset + index, identityColumn)),
         ...(hasNextPage ? { nextCursor: String(offset + pageSize) } : {}),
       };
     },

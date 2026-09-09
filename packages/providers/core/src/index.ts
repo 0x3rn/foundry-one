@@ -17,6 +17,13 @@ export interface ProviderPage<T> {
   readonly total?: number;
 }
 
+export interface DatabaseRowQuery {
+  readonly cursor?: string;
+  readonly search?: string;
+  readonly sortColumn?: string;
+  readonly sortDirection?: "asc" | "desc";
+}
+
 export interface NormalizedUser {
   readonly id: string;
   readonly email: string;
@@ -48,6 +55,10 @@ export interface NormalizedColumn {
 export interface NormalizedRow {
   readonly id: string;
   readonly values: ProviderRecord;
+  readonly identity?: {
+    readonly column: string;
+    readonly value: ProviderScalar;
+  };
   readonly createdAt?: string;
   readonly updatedAt?: string;
 }
@@ -95,7 +106,7 @@ export interface NormalizedFinding {
 
 export interface DatabaseProvider {
   listTables(): Promise<readonly NormalizedTable[]>;
-  listRows(table: string, cursor?: string): Promise<ProviderPage<NormalizedRow>>;
+  listRows(table: string, query?: DatabaseRowQuery | string): Promise<ProviderPage<NormalizedRow>>;
   listColumns?(table: string): Promise<readonly NormalizedColumn[]>;
   insertRow?(table: string, values: ProviderRecord): Promise<NormalizedRow>;
   updateRow?(

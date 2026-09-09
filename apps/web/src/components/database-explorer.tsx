@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  asProviderRecord,
+  encodeCsv,
+  parseTransferFile,
+  type TransferRecord,
+} from "@/lib/database-transfer";
 
 interface DatabaseTable {
   readonly id: string;
@@ -23,6 +29,7 @@ interface DatabaseColumn {
 interface DatabaseRow {
   readonly id: string;
   readonly values: Readonly<Record<string, string | number | boolean | null | string[]>>;
+  readonly identity?: { readonly column: string; readonly value: string | number | boolean | null };
 }
 
 interface DatabaseExplorerProps {
@@ -48,9 +55,19 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [columns, setColumns] = useState<readonly DatabaseColumn[]>([]);
   const [rows, setRows] = useState<readonly DatabaseRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const [sortColumn, setSortColumn] = useState<string>();
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isLoading, setIsLoading] = useState(true);
   const [isTableLoading, setIsTableLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [editingRowId, setEditingRowId] = useState<string>();
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -82,7 +99,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         `/api/projects/${projectId}/database?resource=columns&table=${encodeURIComponent(selectedTable)}`,
       ),
       readApi<{ items: readonly DatabaseRow[]; nextCursor?: string }>(
-        `/api/projects/${projectId}/database?resource=rows&table=${encodeURIComponent(selectedTable)}`,
+        buildRowsUrl(projectId, selectedTable, { search, sortColumn, sortDirection }),
       ),
     ])
       .then(([nextColumns, page]) => {
@@ -101,14 +118,37 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     return () => {
       active = false;
     };
-  }, [projectId, selectedTable]);
+  }, [projectId, selectedTable, search, sortColumn, sortDirection, reloadToken]);
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsTableLoading(true);
+    setNextCursor(undefined);
+    setSearch(searchInput.trim());
+  }
+
+  function toggleSort(column: string) {
+    setIsTableLoading(true);
+    setNextCursor(undefined);
+    if (sortColumn === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortColumn(column);
+      setSortDirection("asc");
+    }
+  }
 
   async function loadNextPage() {
     if (!selectedTable || !nextCursor) return;
     setIsTableLoading(true);
     try {
       const page = await readApi<{ items: readonly DatabaseRow[]; nextCursor?: string }>(
-        `/api/projects/${projectId}/database?resource=rows&table=${encodeURIComponent(selectedTable)}&cursor=${encodeURIComponent(nextCursor)}`,
+        buildRowsUrl(projectId, selectedTable, {
+          cursor: nextCursor,
+          search,
+          sortColumn,
+          sortDirection,
+        }),
       );
       setRows(page.items);
       setNextCursor(page.nextCursor);
@@ -116,6 +156,95 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setError(caught instanceof Error ? caught.message : "The next page could not be loaded.");
     } finally {
       setIsTableLoading(false);
+    }
+  }
+
+  function startEditing(row: DatabaseRow) {
+    if (!row.identity) return;
+    setError(undefined);
+    setEditingRowId(row.id);
+    setEditValues(
+      Object.fromEntries(
+        columns.map((column) => [
+          column.name,
+          formatCell(row.values[column.name]) === "null" ? "" : formatCell(row.values[column.name]),
+        ]),
+      ),
+    );
+  }
+
+  function cancelEditing() {
+    setEditingRowId(undefined);
+    setEditValues({});
+  }
+
+  async function saveEditing(row: DatabaseRow) {
+    if (!selectedTable || !row.identity) return;
+    setIsSaving(true);
+    setError(undefined);
+    try {
+      const values = Object.fromEntries(
+        columns
+          .filter((column) => !column.isIdentity)
+          .map((column) => [column.name, parseEditorValue(editValues[column.name] ?? "", column)]),
+      );
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "update",
+          table: selectedTable,
+          identity: row.identity,
+          values,
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<DatabaseRow>;
+      if (!response.ok || !body.data)
+        throw new Error(body.error?.message ?? "The row could not be updated.");
+      setRows((current) =>
+        current.map((candidate) =>
+          candidate.id === row.id ? (body.data as DatabaseRow) : candidate,
+        ),
+      );
+      cancelEditing();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The row could not be updated.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function importRows(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedTable) return;
+    setIsImporting(true);
+    setError(undefined);
+    try {
+      const format = file.name.toLowerCase().endsWith(".json") ? "json" : "csv";
+      const importedRows = parseTransferFile(await file.text(), format);
+      if (importedRows.length > 100) throw new Error("Imports are limited to 100 rows per action.");
+      for (const row of importedRows) {
+        const response = await fetch(`/api/projects/${projectId}/database`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            operation: "insert",
+            table: selectedTable,
+            values: asProviderRecord(row),
+          }),
+        });
+        const body = (await response.json()) as ApiResponse<DatabaseRow>;
+        if (!response.ok || !body.data) {
+          throw new Error(body.error?.message ?? "An imported row could not be inserted.");
+        }
+      }
+      setIsTableLoading(true);
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The import could not be completed.");
+    } finally {
+      setIsImporting(false);
     }
   }
 
@@ -128,6 +257,21 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         </div>
         <span className="foundry-project-tag">server-side read</span>
       </div>
+      <form className="foundry-database-toolbar" onSubmit={submitSearch}>
+        <label>
+          Search rows
+          <input
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            maxLength={120}
+            placeholder="Search all values"
+          />
+        </label>
+        <button type="submit" disabled={isTableLoading}>
+          Apply
+        </button>
+        {search ? <span>Filtering for “{search}”</span> : <span>All rows</span>}
+      </form>
       {error ? <p className="foundry-database-error">{error}</p> : null}
       {isLoading ? (
         <p className="foundry-database-empty">Reading schemas and tables…</p>
@@ -166,25 +310,102 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                   <tr>
                     {columns.map((column) => (
                       <th key={column.id}>
-                        {column.name}
+                        <button type="button" onClick={() => toggleSort(column.name)}>
+                          {column.name}
+                          {sortColumn === column.name
+                            ? sortDirection === "asc"
+                              ? " ↑"
+                              : " ↓"
+                            : ""}
+                        </button>
                         {column.isPrimaryKey ? " · PK" : ""}
                       </th>
                     ))}
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => (
                     <tr key={row.id}>
-                      {columns.map((column) => (
-                        <td key={column.id}>{formatCell(row.values[column.name])}</td>
-                      ))}
+                      {columns.map((column) => {
+                        const isEditing = editingRowId === row.id;
+                        return (
+                          <td key={column.id}>
+                            {isEditing ? (
+                              <input
+                                value={editValues[column.name] ?? ""}
+                                disabled={column.isIdentity || isSaving}
+                                onChange={(event) =>
+                                  setEditValues((current) => ({
+                                    ...current,
+                                    [column.name]: event.target.value,
+                                  }))
+                                }
+                                aria-label={`Edit ${column.name}`}
+                              />
+                            ) : (
+                              formatCell(row.values[column.name])
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td>
+                        {editingRowId === row.id ? (
+                          <span className="foundry-database-row-actions">
+                            <button
+                              type="button"
+                              disabled={isSaving}
+                              onClick={() => saveEditing(row)}
+                            >
+                              {isSaving ? "Saving…" : "Save"}
+                            </button>
+                            <button type="button" disabled={isSaving} onClick={cancelEditing}>
+                              Cancel
+                            </button>
+                          </span>
+                        ) : row.identity ? (
+                          <button type="button" onClick={() => startEditing(row)}>
+                            Edit
+                          </button>
+                        ) : (
+                          <span title="This row has no stable single-column primary key.">
+                            Read-only
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <div className="foundry-database-footer">
-              <span>{columns.length} columns · stable row reads only</span>
+              <span>{columns.length} columns · stable row identity exposed when available</span>
+              <button
+                type="button"
+                onClick={() => downloadRows("json", selectedTable, columns, rows)}
+              >
+                Export JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadRows("csv", selectedTable, columns, rows)}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                disabled={isImporting}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {isImporting ? "Importing…" : "Import"}
+              </button>
+              <input
+                ref={fileInputRef}
+                className="foundry-visually-hidden"
+                type="file"
+                accept=".csv,.json,application/json,text/csv"
+                onChange={importRows}
+              />
               <button type="button" disabled={!nextCursor || isTableLoading} onClick={loadNextPage}>
                 Next page →
               </button>
@@ -200,4 +421,66 @@ function formatCell(value: string | number | boolean | null | string[] | undefin
   if (value === null || value === undefined) return "null";
   if (Array.isArray(value)) return value.join(", ");
   return String(value);
+}
+
+function buildRowsUrl(
+  projectId: string,
+  table: string,
+  query: {
+    readonly cursor?: string;
+    readonly search?: string;
+    readonly sortColumn?: string;
+    readonly sortDirection?: "asc" | "desc";
+  },
+): string {
+  const params = new URLSearchParams({ resource: "rows", table });
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.search) params.set("search", query.search);
+  if (query.sortColumn) params.set("sortColumn", query.sortColumn);
+  if (query.sortDirection) params.set("sortDirection", query.sortDirection);
+  return `/api/projects/${projectId}/database?${params.toString()}`;
+}
+
+function downloadRows(
+  format: "csv" | "json",
+  table: string | undefined,
+  columns: readonly DatabaseColumn[],
+  rows: readonly DatabaseRow[],
+): void {
+  if (!table) return;
+  const headers = columns.map((column) => column.name);
+  const content =
+    format === "json"
+      ? JSON.stringify(
+          rows.map((row) => row.values),
+          null,
+          2,
+        )
+      : encodeCsv(
+          headers,
+          rows.map((row) => row.values as TransferRecord),
+        );
+  const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/csv" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${table.replace(/[^A-Za-z0-9_.-]/g, "_")}.${format}`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function parseEditorValue(value: string, column: DatabaseColumn): string | number | boolean | null {
+  if (!value && column.nullable) return null;
+  if (column.dataType.includes("boolean")) return value.toLowerCase() === "true";
+  if (
+    column.dataType.includes("int") ||
+    column.dataType.includes("numeric") ||
+    column.dataType.includes("decimal") ||
+    column.dataType.includes("real") ||
+    column.dataType.includes("double")
+  ) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) throw new Error(`${column.name} must be a number.`);
+    return parsed;
+  }
+  return value;
 }

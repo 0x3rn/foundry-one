@@ -1119,6 +1119,16 @@ kbd {
 .foundry-database-explorer {
   border-top: 1px solid var(--line);
 }
+.foundry-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .foundry-database-header,
 .foundry-database-detail-header,
 .foundry-database-footer {
@@ -1135,6 +1145,44 @@ kbd {
   font-size: 16px;
   font-weight: 650;
   letter-spacing: -0.03em;
+}
+.foundry-database-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  padding: 0 25px 12px;
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-database-toolbar label {
+  display: grid;
+  gap: 4px;
+}
+.foundry-database-toolbar input {
+  width: 220px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+.foundry-database-toolbar button,
+.foundry-database-table-wrap th button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.foundry-database-toolbar button {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-soft);
+}
+.foundry-database-toolbar span {
+  padding-bottom: 7px;
 }
 .foundry-database-grid {
   display: grid;
@@ -1222,8 +1270,35 @@ kbd {
   color: var(--ink-soft);
   font-weight: 600;
 }
+.foundry-database-table-wrap th button {
+  padding: 0;
+  color: inherit;
+  font-weight: inherit;
+}
 .foundry-database-table-wrap td {
   color: var(--ink-faint);
+}
+.foundry-database-table-wrap td input {
+  width: 120px;
+  padding: 4px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+.foundry-database-table-wrap td button {
+  padding: 3px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-size: 9px;
+  cursor: pointer;
+}
+.foundry-database-row-actions {
+  display: inline-flex;
+  gap: 4px;
 }
 .foundry-database-footer {
   padding: 9px 12px;

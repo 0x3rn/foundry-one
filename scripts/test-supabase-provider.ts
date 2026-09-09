@@ -167,6 +167,9 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
           },
         ];
       }
+      if (query.includes("information_schema.key_column_usage")) {
+        return [{ column_name: "id" }];
+      }
       if (query.includes("SELECT 1 AS ok")) return [];
       return rows;
     },
@@ -208,6 +211,18 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
   const page = await provider.services.database?.listRows("public.orders");
   assert.equal(page?.items.length, 50);
   assert.equal(page?.nextCursor, "50");
+  assert.deepEqual(page?.items[0]?.identity, { column: "id", value: 1 });
+  const filtered = await provider.services.database?.listRows("public.orders", {
+    search: "row-2",
+    sortColumn: "label",
+    sortDirection: "desc",
+  });
+  assert.equal(filtered?.items.length, 50);
+  await assert.rejects(
+    () =>
+      provider.services.database?.listRows("public.orders", { sortDirection: "sideways" as "asc" }),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
   const inserted = await provider.services.database?.insertRow?.("public.orders", { label: "new" });
   assert.equal(inserted?.values.label, "row-1");
   const updated = await provider.services.database?.updateRow?.(
