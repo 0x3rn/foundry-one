@@ -9,6 +9,7 @@ import {
   AuthorizationError,
   createConfirmationChallenge,
   executeAuthorizedProjectAction,
+  executeAuthorizedWorkspaceAction,
   FixedWindowRateLimiter,
   InvalidConfirmationError,
   ProjectScopeError,
@@ -78,6 +79,32 @@ test("authorization denies wrong workspace and project scope before execution", 
 
   assert.equal(executed, false);
   assert.equal(audit.entries[0]?.result, "denied");
+});
+
+test("workspace-scoped project creation is permission checked and audited", async () => {
+  const audit = new MemoryAuditLog();
+  let created = false;
+
+  const result = await executeAuthorizedWorkspaceAction(
+    {
+      principal: { ...principal, role: "developer" },
+      workspaceId: "workspace-1",
+      permission: "project.manage",
+      action: "project.create",
+      resourceType: "project",
+      requestId: "request-project-create",
+      execute: async () => {
+        created = true;
+        return { id: "project-2" };
+      },
+    },
+    audit,
+  );
+
+  assert.deepEqual(result, { id: "project-2" });
+  assert.equal(created, true);
+  assert.equal(audit.entries[0]?.result, "success");
+  assert.equal(audit.entries[0]?.projectId, undefined);
 });
 
 test("underprivileged requests are denied and dangerous actions require exact confirmation", async () => {

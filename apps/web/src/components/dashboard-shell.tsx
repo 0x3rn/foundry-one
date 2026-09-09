@@ -2,9 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { capabilityIsAvailable, filterItems, paginateItems, type CapabilityKey } from "@foundry/ui";
+import { SupabaseConnectionWizard } from "@/components/supabase-connection-wizard";
 
 interface DashboardShellProps {
   user: { name: string; email: string };
+  workspaceId?: string;
+  projectId?: string;
 }
 
 interface NavigationItem {
@@ -93,13 +96,14 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-export function DashboardShell({ user }: DashboardShellProps) {
+export function DashboardShell({ user, workspaceId, projectId }: DashboardShellProps) {
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [projectQuery, setProjectQuery] = useState("");
   const [projectPage, setProjectPage] = useState(1);
   const [projectFilter, setProjectFilter] = useState<"all" | "ready">("all");
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("foundry-theme");
@@ -306,7 +310,7 @@ export function DashboardShell({ user }: DashboardShellProps) {
               <button
                 className="foundry-button foundry-button-secondary"
                 type="button"
-                onClick={() => setIsCommandOpen(true)}
+                onClick={() => setIsWizardOpen(true)}
               >
                 <span className="foundry-button-plus">+</span> Connect backend
               </button>
@@ -337,7 +341,7 @@ export function DashboardShell({ user }: DashboardShellProps) {
                 <button
                   className="foundry-inline-link"
                   type="button"
-                  onClick={() => setIsCommandOpen(true)}
+                  onClick={() => setIsWizardOpen(true)}
                 >
                   See what you can connect <span>→</span>
                 </button>
@@ -442,7 +446,7 @@ export function DashboardShell({ user }: DashboardShellProps) {
                   <button
                     className="foundry-button foundry-button-secondary"
                     type="button"
-                    onClick={() => setIsCommandOpen(true)}
+                    onClick={() => setIsWizardOpen(true)}
                   >
                     Connect your first project <span>→</span>
                   </button>
@@ -587,7 +591,13 @@ export function DashboardShell({ user }: DashboardShellProps) {
             </div>
             <div className="foundry-command-section">
               <p>Suggested actions</p>
-              <button type="button" onClick={() => setIsCommandOpen(false)}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCommandOpen(false);
+                  setIsWizardOpen(true);
+                }}
+              >
                 <span className="command-symbol">+</span>
                 <span>
                   <strong>Connect a backend</strong>
@@ -615,6 +625,13 @@ export function DashboardShell({ user }: DashboardShellProps) {
             </div>
           </section>
         </div>
+      ) : null}
+      {isWizardOpen ? (
+        <SupabaseConnectionWizard
+          workspaceId={workspaceId}
+          projectId={projectId}
+          onClose={() => setIsWizardOpen(false)}
+        />
       ) : null}
     </div>
   );

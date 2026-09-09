@@ -30,6 +30,7 @@
     "test:credential-vault": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-credential-vault.ts",
     "test:provider-store": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-provider-connection-store.ts",
     "test:authorization-boundary": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-authorization-boundary.ts",
+    "test:supabase-provider": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-supabase-provider.ts",
     "test:provider-contracts": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-provider-contracts.ts",
     "test:ui-primitives": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-ui-primitives.ts",
     "test:workspace": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-workspace-service.ts",

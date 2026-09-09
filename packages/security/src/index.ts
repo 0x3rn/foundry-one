@@ -211,6 +211,15 @@ export class ProjectScopeError extends Error {
   }
 }
 
+export class WorkspaceScopeError extends Error {
+  readonly code = "WORKSPACE_SCOPE_MISMATCH" as const;
+
+  constructor(readonly workspaceId: string) {
+    super(`The authenticated principal is outside workspace ${workspaceId}.`);
+    this.name = "WorkspaceScopeError";
+  }
+}
+
 export interface AuthorizationPrincipal {
   readonly userId: string;
   readonly workspaceId: string;
@@ -370,6 +379,57 @@ export async function executeAuthorizedProjectAction<T>(
     return result as T;
   } catch (error) {
     await audit.write(auditEntry(input, "failure", error));
+    throw error;
+  }
+}
+
+export interface ExecuteWorkspaceActionInput<T> {
+  readonly principal: AuthorizationPrincipal;
+  readonly workspaceId: string;
+  readonly permission: Permission;
+  readonly action: string;
+  readonly resourceType: string;
+  readonly resourceId?: string;
+  readonly requestId: string;
+  readonly rateLimitKey?: string;
+  readonly rateLimiter?: FixedWindowRateLimiter;
+  readonly execute: () => Promise<T>;
+}
+
+export async function executeAuthorizedWorkspaceAction<T>(
+  input: ExecuteWorkspaceActionInput<T>,
+  audit: AuditLogWriter,
+): Promise<T> {
+  const entry = (result: AuditLogEntry["result"], error?: unknown): AuditLogEntry => ({
+    actorUserId: input.principal.userId,
+    workspaceId: input.workspaceId,
+    resourceType: input.resourceType,
+    resourceId: input.resourceId,
+    action: input.action,
+    requestId: input.requestId,
+    result,
+    metadata: error ? { errorCode: errorCode(error) } : undefined,
+  });
+
+  try {
+    if (input.principal.workspaceId !== input.workspaceId) {
+      throw new WorkspaceScopeError(input.workspaceId);
+    }
+    assertPermission(input.principal.role, input.permission);
+    if (input.rateLimiter && input.rateLimitKey) {
+      input.rateLimiter.assertAllowed(input.rateLimitKey);
+    }
+  } catch (error) {
+    await audit.write(entry("denied", error));
+    throw error;
+  }
+
+  try {
+    const result = await input.execute();
+    await audit.write(entry("success"));
+    return result;
+  } catch (error) {
+    await audit.write(entry("failure", error));
     throw error;
   }
 }

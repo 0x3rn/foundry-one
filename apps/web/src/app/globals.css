@@ -1137,6 +1137,111 @@ kbd {
   margin-right: 4px;
 }
 
+.foundry-wizard-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 21, 19, 0.55);
+  backdrop-filter: blur(7px);
+}
+.foundry-wizard {
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 15px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.foundry-wizard-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 25px;
+  padding: 28px 30px 23px;
+  border-bottom: 1px solid var(--line);
+}
+.foundry-wizard-header h2 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.055em;
+}
+.foundry-wizard-header p:last-child {
+  max-width: 490px;
+  margin: 9px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.foundry-wizard-form {
+  display: grid;
+  gap: 16px;
+  padding: 24px 30px 28px;
+}
+.foundry-wizard-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+.foundry-wizard-form label span {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+.foundry-wizard-form input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+}
+.foundry-wizard-form input:focus {
+  border-color: var(--amber);
+  outline: 0;
+}
+.foundry-wizard-form small {
+  margin-top: -2px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 400;
+}
+.foundry-wizard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.foundry-wizard-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 5px;
+}
+.foundry-wizard-footer p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+.foundry-wizard-footer .foundry-status-dot {
+  flex: 0 0 7px;
+}
+.foundry-wizard-footer > div {
+  display: flex;
+  gap: 8px;
+}
+
 .foundry-login-page {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(420px, 0.8fr);
@@ -1403,6 +1508,22 @@ kbd {
   }
   .foundry-muted-note {
     display: none;
+  }
+  .foundry-wizard-header,
+  .foundry-wizard-form {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+  .foundry-wizard-grid {
+    grid-template-columns: 1fr;
+  }
+  .foundry-wizard-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .foundry-wizard-footer > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
   .foundry-login-page {
     grid-template-columns: 1fr;

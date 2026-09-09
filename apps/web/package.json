@@ -11,6 +11,12 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@foundry/auth": "0.1.0",
+    "@foundry/database": "0.1.0",
+    "@foundry/encryption": "0.1.0",
+    "@foundry/providers-core": "0.1.0",
+    "@foundry/providers-supabase": "0.1.0",
+    "@foundry/security": "0.1.0",
     "@foundry/ui": "0.1.0",
     "next": "16.3.4",
     "react": "19.2.8",
