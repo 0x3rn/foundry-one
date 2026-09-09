@@ -1773,6 +1773,19 @@ kbd {
   font-size: 9px;
   line-height: 1.6;
 }
+.foundry-auth-switch {
+  margin: 14px 0 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  text-align: center;
+}
+.foundry-auth-switch a {
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--amber);
+  text-underline-offset: 3px;
+}
 
 @media (max-width: 1080px) {
   .foundry-content {

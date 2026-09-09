@@ -62,12 +62,32 @@ async function run(): Promise<void> {
   );
   assert.match(unauthenticatedPage.headers.get("location") ?? "", /\/login$/);
 
+  const registrationPage = await request("/register");
+  await assertStatus(registrationPage, 200, "registration page");
+  const registrationPageBody = await registrationPage.text();
+  assert.match(registrationPageBody, /Create your account/);
+  assert.match(registrationPageBody, /Confirm password/);
+
+  const loginPage = await request("/login");
+  await assertStatus(loginPage, 200, "login page");
+  const loginPageBody = await loginPage.text();
+  assert.match(loginPageBody, /Create an account/);
+
   const signUp = await request("/api/auth/sign-up/email", {
     method: "POST",
     body: JSON.stringify({ name: "Foundry Auth Test", email, password }),
   });
   await assertStatus(signUp, 200, "registration");
   assert.ok(cookie, "registration should set a session cookie");
+
+  const duplicateSignUp = await request("/api/auth/sign-up/email", {
+    method: "POST",
+    body: JSON.stringify({ name: "Foundry Auth Test", email, password }),
+  });
+  assert.ok(
+    duplicateSignUp.status >= 400 && duplicateSignUp.status < 500,
+    `duplicate registration should fail safely, received HTTP ${duplicateSignUp.status}`,
+  );
 
   const sessionAfterRegistration = await request("/api/me");
   await assertStatus(sessionAfterRegistration, 200, "protected session check after registration");

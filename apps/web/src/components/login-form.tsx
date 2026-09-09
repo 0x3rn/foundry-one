@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export function LoginForm() {
@@ -107,6 +108,9 @@ export function LoginForm() {
           </form>
           <p className="foundry-login-footnote">
             Your workspace is protected by Foundry identity and server-side authorization.
+          </p>
+          <p className="foundry-auth-switch">
+            New to Foundry One? <Link href="/register">Create an account</Link>
           </p>
         </div>
       </section>

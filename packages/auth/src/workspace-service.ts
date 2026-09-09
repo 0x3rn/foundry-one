@@ -116,6 +116,8 @@ export async function addWorkspaceMember(
 export function createPrismaWorkspaceRepository(client: PrismaClient): WorkspaceRepository {
   return {
     async provisionWorkspace(input) {
+      // Neon pooler connections can take longer on a cold start. Keep workspace
+      // provisioning atomic while allowing a bounded amount of startup latency.
       return client.$transaction(async (transaction) => {
         const organization = await transaction.organization.create({
           data: {
@@ -150,7 +152,7 @@ export function createPrismaWorkspaceRepository(client: PrismaClient): Workspace
           workspaceId: workspace.id,
           ownerUserId: input.ownerUserId,
         };
-      });
+      }, { maxWait: 10_000, timeout: 30_000 });
     },
     async upsertMembership(input) {
       const membership = await client.workspaceMember.upsert({
