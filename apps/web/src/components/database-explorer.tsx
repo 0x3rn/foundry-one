@@ -26,6 +26,8 @@ interface DatabaseTable {
   readonly schema?: string;
   readonly kind: string;
   readonly isView?: boolean;
+  readonly isMaterializedView?: boolean;
+  readonly rowCount?: number;
 }
 
 interface DatabaseColumn {
@@ -1137,7 +1139,12 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                 <span>{table.name}</span>
                 <small>
                   {table.schema}
-                  {table.isView ? " · view" : ""}
+                  {table.isMaterializedView
+                    ? " · materialized view"
+                    : table.isView
+                      ? " · view"
+                      : ""}
+                  {table.rowCount !== undefined ? ` · ${table.rowCount.toLocaleString()} rows` : ""}
                 </small>
               </button>
             ))}

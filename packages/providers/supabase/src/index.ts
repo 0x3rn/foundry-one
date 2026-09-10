@@ -486,11 +486,21 @@ function createDatabaseProvider(
         schema_name: string;
         table_name: string;
         table_type: string;
+        row_count: number | string | null;
       }>(
-        `SELECT table_schema AS schema_name, table_name, table_type
-         FROM information_schema.tables
-         WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-         ORDER BY table_schema, table_name`,
+        `SELECT n.nspname AS schema_name,
+                c.relname AS table_name,
+                CASE c.relkind
+                  WHEN 'r' THEN 'BASE TABLE'
+                  WHEN 'v' THEN 'VIEW'
+                  WHEN 'm' THEN 'MATERIALIZED VIEW'
+                END AS table_type,
+                CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint ELSE NULL END AS row_count
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE c.relkind IN ('r', 'v', 'm')
+           AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY n.nspname, c.relname`,
       );
       return rows.map((row) => ({
         id: `${row.schema_name}.${row.table_name}`,
@@ -498,6 +508,8 @@ function createDatabaseProvider(
         schema: row.schema_name,
         kind: "table",
         isView: row.table_type !== "BASE TABLE",
+        isMaterializedView: row.table_type === "MATERIALIZED VIEW",
+        ...(row.row_count !== null ? { rowCount: asFiniteNumber(row.row_count) } : {}),
       }));
     },
     async listColumns(table): Promise<readonly NormalizedColumn[]> {

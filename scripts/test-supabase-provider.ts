@@ -154,8 +154,15 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
   const database: SupabaseDatabaseClient = {
     async query(query) {
       executedQueries.push(query);
-      if (query.includes("information_schema.tables")) {
-        return [{ schema_name: "public", table_name: "orders", table_type: "BASE TABLE" }];
+      if (query.includes("c.relkind IN")) {
+        return [
+          {
+            schema_name: "public",
+            table_name: "orders",
+            table_type: "BASE TABLE",
+            row_count: "50",
+          },
+        ];
       }
       if (query.includes("FROM pg_proc")) {
         return [
@@ -258,6 +265,8 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     schema: "public",
     kind: "table",
     isView: false,
+    isMaterializedView: false,
+    rowCount: 50,
   });
   assert.deepEqual(await provider.services.database?.describeCatalog?.(), {
     functions: [

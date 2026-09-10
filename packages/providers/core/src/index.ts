@@ -124,6 +124,7 @@ export interface NormalizedTable {
   readonly schema?: string;
   readonly rowCount?: number;
   readonly isView?: boolean;
+  readonly isMaterializedView?: boolean;
 }
 
 export interface NormalizedColumn {
