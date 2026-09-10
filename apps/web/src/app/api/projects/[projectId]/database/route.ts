@@ -103,7 +103,14 @@ function parseColumnDefinition(value: unknown): DatabaseColumnDefinition {
     typeof column.nullable !== "boolean" ||
     (column.isPrimaryKey !== undefined && typeof column.isPrimaryKey !== "boolean") ||
     (column.isUnique !== undefined && typeof column.isUnique !== "boolean") ||
-    (column.defaultValue !== undefined && typeof column.defaultValue !== "string")
+    (column.defaultValue !== undefined && typeof column.defaultValue !== "string") ||
+    (column.references !== undefined &&
+      (!column.references ||
+        typeof column.references !== "object" ||
+        Array.isArray(column.references) ||
+        typeof (column.references as Record<string, unknown>).schema !== "string" ||
+        typeof (column.references as Record<string, unknown>).table !== "string" ||
+        typeof (column.references as Record<string, unknown>).column !== "string"))
   ) {
     throw new SupabaseCredentialError(
       "A column needs a name, dataType, nullable flag, and optional primary-key/unique/default values.",
@@ -116,6 +123,9 @@ function parseColumnDefinition(value: unknown): DatabaseColumnDefinition {
     ...(column.isPrimaryKey !== undefined ? { isPrimaryKey: column.isPrimaryKey } : {}),
     ...(column.isUnique !== undefined ? { isUnique: column.isUnique } : {}),
     ...(column.defaultValue !== undefined ? { defaultValue: column.defaultValue } : {}),
+    ...(column.references !== undefined
+      ? { references: column.references as DatabaseColumnDefinition["references"] }
+      : {}),
   };
 }
 

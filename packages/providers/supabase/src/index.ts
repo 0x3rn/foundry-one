@@ -283,6 +283,11 @@ function validateColumnDefinition(column: DatabaseColumnDefinition): {
   readonly isPrimaryKey: boolean;
   readonly isUnique: boolean;
   readonly defaultValue?: string;
+  readonly references?: {
+    readonly schema: string;
+    readonly table: string;
+    readonly column: string;
+  };
 } {
   if (!column.name.trim()) {
     throw new ProviderError("invalid_configuration", "A column name is required.", {
@@ -304,6 +309,14 @@ function validateColumnDefinition(column: DatabaseColumnDefinition): {
       { provider: "supabase", operation: "validate PostgreSQL column" },
     );
   }
+  const references = column.references
+    ? (() => {
+        quoteIdentifier(column.references.schema);
+        quoteIdentifier(column.references.table);
+        quoteIdentifier(column.references.column);
+        return column.references;
+      })()
+    : undefined;
   return {
     name: column.name,
     dataType: validateDataType(column.dataType),
@@ -313,6 +326,7 @@ function validateColumnDefinition(column: DatabaseColumnDefinition): {
     ...(validateDefaultValue(column.defaultValue)
       ? { defaultValue: validateDefaultValue(column.defaultValue) }
       : {}),
+    ...(references ? { references } : {}),
   };
 }
 
@@ -410,7 +424,7 @@ function createDatabaseProvider(
       const definition = normalizedColumns
         .map(
           (column) =>
-            `${quoteIdentifier(column.name)} ${column.dataType}${column.defaultValue ? ` DEFAULT ${column.defaultValue}` : ""}${column.isPrimaryKey ? " PRIMARY KEY" : ""}${column.isUnique ? " UNIQUE" : ""}${column.nullable ? "" : " NOT NULL"}`,
+            `${quoteIdentifier(column.name)} ${column.dataType}${column.defaultValue ? ` DEFAULT ${column.defaultValue}` : ""}${column.isPrimaryKey ? " PRIMARY KEY" : ""}${column.isUnique ? " UNIQUE" : ""}${column.references ? ` REFERENCES ${quoteIdentifier(column.references.schema)}.${quoteIdentifier(column.references.table)} (${quoteIdentifier(column.references.column)})` : ""}${column.nullable ? "" : " NOT NULL"}`,
         )
         .join(", ");
       await client.query(`CREATE TABLE ${quotedSchema}.${quotedTable} (${definition})`);
@@ -427,7 +441,7 @@ function createDatabaseProvider(
         );
       }
       await client.query(
-        `ALTER TABLE ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} ADD COLUMN ${quoteIdentifier(normalizedColumn.name)} ${normalizedColumn.dataType}${normalizedColumn.defaultValue ? ` DEFAULT ${normalizedColumn.defaultValue}` : ""}${normalizedColumn.isUnique ? " UNIQUE" : ""}${normalizedColumn.nullable ? "" : " NOT NULL"}`,
+        `ALTER TABLE ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} ADD COLUMN ${quoteIdentifier(normalizedColumn.name)} ${normalizedColumn.dataType}${normalizedColumn.defaultValue ? ` DEFAULT ${normalizedColumn.defaultValue}` : ""}${normalizedColumn.isUnique ? " UNIQUE" : ""}${normalizedColumn.references ? ` REFERENCES ${quoteIdentifier(normalizedColumn.references.schema)}.${quoteIdentifier(normalizedColumn.references.table)} (${quoteIdentifier(normalizedColumn.references.column)})` : ""}${normalizedColumn.nullable ? "" : " NOT NULL"}`,
       );
       return {
         id: `${table}.${normalizedColumn.name}`,

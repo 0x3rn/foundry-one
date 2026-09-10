@@ -13,6 +13,7 @@ import {
   prepareRowPatchValues,
   type RowEditorInput,
 } from "@/lib/database-row-editor";
+import { parseSchemaReference } from "@/lib/database-schema-editor";
 
 interface DatabaseTable {
   readonly id: string;
@@ -118,11 +119,13 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [newTablePrimaryKey, setNewTablePrimaryKey] = useState(false);
   const [newTableUnique, setNewTableUnique] = useState(false);
   const [newTableDefault, setNewTableDefault] = useState("");
+  const [newTableReference, setNewTableReference] = useState("");
   const [newColumnName, setNewColumnName] = useState("");
   const [newColumnType, setNewColumnType] = useState("text");
   const [newColumnNullable, setNewColumnNullable] = useState(true);
   const [newColumnUnique, setNewColumnUnique] = useState(false);
   const [newColumnDefault, setNewColumnDefault] = useState("");
+  const [newColumnReference, setNewColumnReference] = useState("");
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [newRowValues, setNewRowValues] = useState<RowEditorInput>({});
@@ -578,6 +581,13 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setError("A table name and first column are required.");
       return;
     }
+    let references;
+    try {
+      references = parseSchemaReference(newTableReference);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The table reference is invalid.");
+      return;
+    }
     setIsSchemaSaving(true);
     setError(undefined);
     try {
@@ -596,6 +606,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
               ...(newTablePrimaryKey ? { isPrimaryKey: true } : {}),
               ...(newTableUnique && !newTablePrimaryKey ? { isUnique: true } : {}),
               ...(newTableDefault.trim() ? { defaultValue: newTableDefault.trim() } : {}),
+              ...(references ? { references } : {}),
             },
           ],
         }),
@@ -609,6 +620,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setNewTableNullable(false);
       setNewTablePrimaryKey(false);
       setNewTableUnique(false);
+      setNewTableReference("");
       setSelectedTable(body.data.id);
       setReloadToken((current) => current + 1);
     } catch (caught) {
@@ -623,6 +635,13 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     const column = newColumnName.trim();
     if (!selectedTable || !column) {
       setError("A column name is required.");
+      return;
+    }
+    let references;
+    try {
+      references = parseSchemaReference(newColumnReference);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The column reference is invalid.");
       return;
     }
     setIsSchemaSaving(true);
@@ -640,6 +659,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
             nullable: newColumnNullable,
             ...(newColumnUnique ? { isUnique: true } : {}),
             ...(newColumnDefault.trim() ? { defaultValue: newColumnDefault.trim() } : {}),
+            ...(references ? { references } : {}),
           },
         }),
       });
@@ -650,6 +670,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setNewColumnDefault("");
       setNewColumnNullable(true);
       setNewColumnUnique(false);
+      setNewColumnReference("");
       setReloadToken((current) => current + 1);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The column could not be added.");
@@ -732,6 +753,12 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
             placeholder="default (optional)"
             aria-label="New table column default"
           />
+          <input
+            value={newTableReference}
+            onChange={(event) => setNewTableReference(event.target.value)}
+            placeholder="reference: schema.table.column"
+            aria-label="New table column foreign key reference"
+          />
           <button type="submit" disabled={isSchemaSaving}>
             Create
           </button>
@@ -775,6 +802,12 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
               onChange={(event) => setNewColumnDefault(event.target.value)}
               placeholder="default (optional)"
               aria-label="New column default"
+            />
+            <input
+              value={newColumnReference}
+              onChange={(event) => setNewColumnReference(event.target.value)}
+              placeholder="reference: schema.table.column"
+              aria-label="New column foreign key reference"
             />
             <button type="submit" disabled={isSchemaSaving}>
               Add

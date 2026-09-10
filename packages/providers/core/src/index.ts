@@ -76,6 +76,11 @@ export interface DatabaseColumnDefinition {
   readonly isPrimaryKey?: boolean;
   readonly isUnique?: boolean;
   readonly defaultValue?: string;
+  readonly references?: {
+    readonly schema: string;
+    readonly table: string;
+    readonly column: string;
+  };
 }
 
 export interface NormalizedUser {
