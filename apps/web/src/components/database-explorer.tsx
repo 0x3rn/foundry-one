@@ -74,6 +74,8 @@ interface DatabaseExplorerProps {
   readonly projectId: string;
 }
 
+type DatabaseDetailTab = "data" | "structure" | "indexes" | "relations" | "activity";
+
 interface ApiResponse<T> {
   readonly data?: T;
   readonly error?: { readonly message?: string };
@@ -91,6 +93,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [tables, setTables] = useState<readonly DatabaseTable[]>([]);
   const [catalog, setCatalog] = useState<DatabaseCatalog>();
   const [selectedTable, setSelectedTable] = useState<string>();
+  const [activeDetailTab, setActiveDetailTab] = useState<DatabaseDetailTab>("data");
   const [columns, setColumns] = useState<readonly DatabaseColumn[]>([]);
   const [details, setDetails] = useState<DatabaseTableDetails>();
   const [rows, setRows] = useState<readonly DatabaseRow[]>([]);
@@ -841,6 +844,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                 onClick={() => {
                   setIsTableLoading(true);
                   setError(undefined);
+                  setActiveDetailTab("data");
                   setSelectedTable(table.id);
                 }}
               >
@@ -858,159 +862,322 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
               <span>{isTableLoading ? "Loading…" : `${rows.length} rows in page`}</span>
             </div>
             {details ? (
-              <div className="foundry-database-metadata" aria-label="Table structure summary">
-                <span>Indexes {details.indexes.length}</span>
-                <span>Constraints {details.constraints.length}</span>
-                <span>Relations {details.relations.length}</span>
-                <span>Triggers {details.triggers.length}</span>
-              </div>
+              <>
+                <div className="foundry-database-metadata" aria-label="Table structure summary">
+                  <span>Indexes {details.indexes.length}</span>
+                  <span>Constraints {details.constraints.length}</span>
+                  <span>Relations {details.relations.length}</span>
+                  <span>Triggers {details.triggers.length}</span>
+                </div>
+                <div className="foundry-database-tabs" role="tablist" aria-label="Table details">
+                  {(
+                    [
+                      ["data", "Data"],
+                      ["structure", "Structure"],
+                      ["indexes", "Indexes"],
+                      ["relations", "Relations"],
+                      ["activity", "Activity"],
+                    ] as const
+                  ).map(([tab, label]) => (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeDetailTab === tab}
+                      className={activeDetailTab === tab ? "is-selected" : ""}
+                      key={tab}
+                      onClick={() => setActiveDetailTab(tab)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
             ) : null}
-            <div className="foundry-database-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>
-                      <input
-                        type="checkbox"
-                        checked={allVisibleRowsSelected}
-                        disabled={selectableRows.length === 0 || isBulkDeleting}
-                        onChange={toggleAllVisibleRows}
-                        aria-label="Select all rows with a stable identity"
-                      />
-                    </th>
-                    {columns.map((column) => (
-                      <th key={column.id}>
-                        <button type="button" onClick={() => toggleSort(column.name)}>
-                          {column.name}
-                          {sortColumn === column.name
-                            ? sortDirection === "asc"
-                              ? " ↑"
-                              : " ↓"
-                            : ""}
-                        </button>
-                        {column.isPrimaryKey ? " · PK" : ""}
-                      </th>
-                    ))}
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={row.identity ? selectedRowIds.has(row.id) : false}
-                          disabled={!row.identity || isBulkDeleting}
-                          onChange={() => toggleRowSelection(row)}
-                          aria-label={
-                            row.identity
-                              ? `Select row ${String(row.identity.value)}`
-                              : "Row cannot be selected without a stable identity"
-                          }
-                        />
-                      </td>
-                      {columns.map((column) => {
-                        const isEditing = editingRowId === row.id;
-                        return (
-                          <td key={column.id}>
-                            {isEditing ? (
-                              <input
-                                value={editValues[column.name] ?? ""}
-                                disabled={column.isIdentity || isSaving}
-                                onChange={(event) =>
-                                  setEditValues((current) => ({
-                                    ...current,
-                                    [column.name]: event.target.value,
-                                  }))
-                                }
-                                aria-label={`Edit ${column.name}`}
-                              />
+            {activeDetailTab === "data" ? (
+              <>
+                <div className="foundry-database-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>
+                          <input
+                            type="checkbox"
+                            checked={allVisibleRowsSelected}
+                            disabled={selectableRows.length === 0 || isBulkDeleting}
+                            onChange={toggleAllVisibleRows}
+                            aria-label="Select all rows with a stable identity"
+                          />
+                        </th>
+                        {columns.map((column) => (
+                          <th key={column.id}>
+                            <button type="button" onClick={() => toggleSort(column.name)}>
+                              {column.name}
+                              {sortColumn === column.name
+                                ? sortDirection === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
+                            {column.isPrimaryKey ? " · PK" : ""}
+                          </th>
+                        ))}
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => (
+                        <tr key={row.id}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={row.identity ? selectedRowIds.has(row.id) : false}
+                              disabled={!row.identity || isBulkDeleting}
+                              onChange={() => toggleRowSelection(row)}
+                              aria-label={
+                                row.identity
+                                  ? `Select row ${String(row.identity.value)}`
+                                  : "Row cannot be selected without a stable identity"
+                              }
+                            />
+                          </td>
+                          {columns.map((column) => {
+                            const isEditing = editingRowId === row.id;
+                            return (
+                              <td key={column.id}>
+                                {isEditing ? (
+                                  <input
+                                    value={editValues[column.name] ?? ""}
+                                    disabled={column.isIdentity || isSaving}
+                                    onChange={(event) =>
+                                      setEditValues((current) => ({
+                                        ...current,
+                                        [column.name]: event.target.value,
+                                      }))
+                                    }
+                                    aria-label={`Edit ${column.name}`}
+                                  />
+                                ) : (
+                                  formatCell(row.values[column.name])
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td>
+                            {editingRowId === row.id ? (
+                              <span className="foundry-database-row-actions">
+                                <button
+                                  type="button"
+                                  disabled={isSaving}
+                                  onClick={() => saveEditing(row)}
+                                >
+                                  {isSaving ? "Saving…" : "Save"}
+                                </button>
+                                <button type="button" disabled={isSaving} onClick={cancelEditing}>
+                                  Cancel
+                                </button>
+                              </span>
+                            ) : row.identity ? (
+                              <span className="foundry-database-row-actions">
+                                <button type="button" onClick={() => startEditing(row)}>
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isDuplicating}
+                                  onClick={() => duplicateRow(row)}
+                                >
+                                  {isDuplicating ? "Duplicating…" : "Duplicate"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isDeleting}
+                                  onClick={() => deleteRow(row)}
+                                >
+                                  Delete
+                                </button>
+                              </span>
                             ) : (
-                              formatCell(row.values[column.name])
+                              <span title="This row has no stable single-column primary key.">
+                                Read-only
+                              </span>
                             )}
                           </td>
-                        );
-                      })}
-                      <td>
-                        {editingRowId === row.id ? (
-                          <span className="foundry-database-row-actions">
-                            <button
-                              type="button"
-                              disabled={isSaving}
-                              onClick={() => saveEditing(row)}
-                            >
-                              {isSaving ? "Saving…" : "Save"}
-                            </button>
-                            <button type="button" disabled={isSaving} onClick={cancelEditing}>
-                              Cancel
-                            </button>
-                          </span>
-                        ) : row.identity ? (
-                          <span className="foundry-database-row-actions">
-                            <button type="button" onClick={() => startEditing(row)}>
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isDuplicating}
-                              onClick={() => duplicateRow(row)}
-                            >
-                              {isDuplicating ? "Duplicating…" : "Duplicate"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isDeleting}
-                              onClick={() => deleteRow(row)}
-                            >
-                              Delete
-                            </button>
-                          </span>
-                        ) : (
-                          <span title="This row has no stable single-column primary key.">
-                            Read-only
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="foundry-database-footer">
-              <span>{columns.length} columns · stable row identity exposed when available</span>
-              <button
-                type="button"
-                onClick={() => downloadRows("json", selectedTable, columns, rows)}
-              >
-                Export JSON
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadRows("csv", selectedTable, columns, rows)}
-              >
-                Export CSV
-              </button>
-              <button
-                type="button"
-                disabled={isImporting}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {isImporting ? "Importing…" : "Import"}
-              </button>
-              <input
-                ref={fileInputRef}
-                className="foundry-visually-hidden"
-                type="file"
-                accept=".csv,.json,application/json,text/csv"
-                onChange={importRows}
-              />
-              <button type="button" disabled={!nextCursor || isTableLoading} onClick={loadNextPage}>
-                Next page →
-              </button>
-            </div>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="foundry-database-footer">
+                  <span>{columns.length} columns · stable row identity exposed when available</span>
+                  <button
+                    type="button"
+                    onClick={() => downloadRows("json", selectedTable, columns, rows)}
+                  >
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadRows("csv", selectedTable, columns, rows)}
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isImporting}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {isImporting ? "Importing…" : "Import"}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    className="foundry-visually-hidden"
+                    type="file"
+                    accept=".csv,.json,application/json,text/csv"
+                    onChange={importRows}
+                  />
+                  <button
+                    type="button"
+                    disabled={!nextCursor || isTableLoading}
+                    onClick={loadNextPage}
+                  >
+                    Next page →
+                  </button>
+                </div>
+              </>
+            ) : (
+              <DatabaseDetailPanel tab={activeDetailTab} columns={columns} details={details} />
+            )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function DatabaseDetailPanel({
+  tab,
+  columns,
+  details,
+}: {
+  readonly tab: Exclude<DatabaseDetailTab, "data">;
+  readonly columns: readonly DatabaseColumn[];
+  readonly details: DatabaseTableDetails | undefined;
+}) {
+  if (!details) return <p className="foundry-database-empty">Table details are still loading.</p>;
+  if (tab === "structure") {
+    return (
+      <div className="foundry-database-detail-panel" role="tabpanel">
+        <h4>Structure</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>Nullable</th>
+              <th>Default</th>
+              <th>Identity</th>
+            </tr>
+          </thead>
+          <tbody>
+            {columns.map((column) => (
+              <tr key={column.id}>
+                <td>
+                  {column.name}
+                  {column.isPrimaryKey ? " · PK" : ""}
+                </td>
+                <td>{column.dataType}</td>
+                <td>{column.nullable ? "yes" : "no"}</td>
+                <td>{column.defaultValue ?? "—"}</td>
+                <td>{column.isIdentity ? "generated" : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  if (tab === "indexes") {
+    return (
+      <div className="foundry-database-detail-panel" role="tabpanel">
+        <h4>Indexes</h4>
+        {details.indexes.length === 0 ? (
+          <p className="foundry-database-empty">No indexes reported for this table.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Definition</th>
+                <th>Flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              {details.indexes.map((index) => (
+                <tr key={index.name}>
+                  <td>{index.name}</td>
+                  <td>{index.definition}</td>
+                  <td>
+                    {[index.isPrimary ? "primary" : "", index.isUnique ? "unique" : ""]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    );
+  }
+  if (tab === "relations") {
+    return (
+      <div className="foundry-database-detail-panel" role="tabpanel">
+        <h4>Relations and constraints</h4>
+        {details.relations.length === 0 && details.constraints.length === 0 ? (
+          <p className="foundry-database-empty">No relations or constraints reported.</p>
+        ) : (
+          <>
+            <table>
+              <thead>
+                <tr>
+                  <th>Relation</th>
+                  <th>Columns</th>
+                  <th>References</th>
+                </tr>
+              </thead>
+              <tbody>
+                {details.relations.map((relation) => (
+                  <tr key={relation.name}>
+                    <td>{relation.name}</td>
+                    <td>{relation.columns.join(", ")}</td>
+                    <td>{`${relation.referencedTable} (${relation.referencedColumns.join(", ")})`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <ul>
+              {details.constraints.map((constraint) => (
+                <li key={constraint.name}>
+                  {constraint.name} · {constraint.type} · {constraint.definition}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="foundry-database-detail-panel" role="tabpanel">
+      <h4>Activity</h4>
+      {details.triggers.length === 0 ? (
+        <p className="foundry-database-empty">No triggers reported for this table.</p>
+      ) : (
+        <ul>
+          {details.triggers.map((trigger) => (
+            <li key={trigger}>{trigger}</li>
+          ))}
+        </ul>
       )}
     </div>
   );
