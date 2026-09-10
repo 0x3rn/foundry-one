@@ -13,7 +13,12 @@ import {
   prepareRowPatchValues,
   type RowEditorInput,
 } from "@/lib/database-row-editor";
-import { parseSchemaReference } from "@/lib/database-schema-editor";
+import {
+  ensureUniqueSchemaColumnNames,
+  parseSchemaReference,
+  prepareSchemaColumnDraft,
+  type SchemaColumnDraft,
+} from "@/lib/database-schema-editor";
 
 interface DatabaseTable {
   readonly id: string;
@@ -76,6 +81,7 @@ interface DatabaseExplorerProps {
 }
 
 type DatabaseDetailTab = "data" | "structure" | "indexes" | "relations" | "activity";
+type TableColumnDraft = SchemaColumnDraft & { readonly id: number };
 
 interface ApiResponse<T> {
   readonly data?: T;
@@ -120,6 +126,9 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [newTableUnique, setNewTableUnique] = useState(false);
   const [newTableDefault, setNewTableDefault] = useState("");
   const [newTableReference, setNewTableReference] = useState("");
+  const [newTableAdditionalColumns, setNewTableAdditionalColumns] = useState<
+    readonly TableColumnDraft[]
+  >([]);
   const [newColumnName, setNewColumnName] = useState("");
   const [newColumnType, setNewColumnType] = useState("text");
   const [newColumnNullable, setNewColumnNullable] = useState(true);
@@ -584,16 +593,22 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setError("A table name and first column are required.");
       return;
     }
-    let references;
     try {
-      references = parseSchemaReference(newTableReference);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The table reference is invalid.");
-      return;
-    }
-    setIsSchemaSaving(true);
-    setError(undefined);
-    try {
+      const definitions = [
+        prepareSchemaColumnDraft({
+          name: newTableColumn,
+          dataType: newTableType,
+          nullable: newTableNullable,
+          isPrimaryKey: newTablePrimaryKey,
+          isUnique: newTableUnique,
+          defaultValue: newTableDefault,
+          reference: newTableReference,
+        }),
+        ...newTableAdditionalColumns.map((draft) => prepareSchemaColumnDraft(draft)),
+      ];
+      ensureUniqueSchemaColumnNames(definitions);
+      setError(undefined);
+      setIsSchemaSaving(true);
       const response = await fetch(`/api/projects/${projectId}/database`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -601,17 +616,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
           operation: "create-table",
           schema: "public",
           table,
-          columns: [
-            {
-              name: column,
-              dataType: newTableType,
-              nullable: newTablePrimaryKey ? false : newTableNullable,
-              ...(newTablePrimaryKey ? { isPrimaryKey: true } : {}),
-              ...(newTableUnique && !newTablePrimaryKey ? { isUnique: true } : {}),
-              ...(newTableDefault.trim() ? { defaultValue: newTableDefault.trim() } : {}),
-              ...(references ? { references } : {}),
-            },
-          ],
+          columns: definitions,
         }),
       });
       const body = (await response.json()) as ApiResponse<DatabaseTable>;
@@ -624,6 +629,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setNewTablePrimaryKey(false);
       setNewTableUnique(false);
       setNewTableReference("");
+      setNewTableAdditionalColumns([]);
       setSelectedTable(body.data.id);
       setReloadToken((current) => current + 1);
     } catch (caught) {
@@ -631,6 +637,24 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     } finally {
       setIsSchemaSaving(false);
     }
+  }
+
+  function addTableColumnDraft() {
+    setNewTableAdditionalColumns((current) => [
+      ...current,
+      {
+        id: current.length === 0 ? 1 : Math.max(...current.map((draft) => draft.id)) + 1,
+        name: "",
+        dataType: "text",
+        nullable: true,
+      },
+    ]);
+  }
+
+  function updateTableColumnDraft(id: number, update: Partial<SchemaColumnDraft>) {
+    setNewTableAdditionalColumns((current) =>
+      current.map((draft) => (draft.id === id ? { ...draft, ...update } : draft)),
+    );
   }
 
   async function addColumn(event: FormEvent<HTMLFormElement>) {
@@ -798,6 +822,60 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
             placeholder="reference: schema.table.column"
             aria-label="New table column foreign key reference"
           />
+          {newTableAdditionalColumns.map((draft) => (
+            <div key={draft.id} className="foundry-database-column-draft">
+              <input
+                value={draft.name}
+                onChange={(event) => updateTableColumnDraft(draft.id, { name: event.target.value })}
+                placeholder="additional column"
+                aria-label={`Additional column ${draft.id} name`}
+              />
+              <select
+                value={draft.dataType}
+                onChange={(event) =>
+                  updateTableColumnDraft(draft.id, { dataType: event.target.value })
+                }
+                aria-label={`Additional column ${draft.id} type`}
+              >
+                <option value="text">text</option>
+                <option value="integer">integer</option>
+                <option value="boolean">boolean</option>
+                <option value="uuid">uuid</option>
+                <option value="timestamp with time zone">timestamp with time zone</option>
+              </select>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={draft.nullable}
+                  onChange={(event) =>
+                    updateTableColumnDraft(draft.id, { nullable: event.target.checked })
+                  }
+                />
+                nullable
+              </label>
+              <input
+                value={draft.defaultValue ?? ""}
+                onChange={(event) =>
+                  updateTableColumnDraft(draft.id, { defaultValue: event.target.value })
+                }
+                placeholder="default (optional)"
+                aria-label={`Additional column ${draft.id} default`}
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setNewTableAdditionalColumns((current) =>
+                    current.filter((candidate) => candidate.id !== draft.id),
+                  )
+                }
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={addTableColumnDraft} disabled={isSchemaSaving}>
+            Add column definition
+          </button>
           <button type="submit" disabled={isSchemaSaving}>
             Create
           </button>
