@@ -298,6 +298,18 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
   );
   await assert.rejects(
     () =>
+      provider.services.database?.createTable?.("public", "unsafe_default", [
+        {
+          name: "value",
+          dataType: "text",
+          nullable: false,
+          defaultValue: "now(); DROP TABLE users",
+        },
+      ]),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
+  await assert.rejects(
+    () =>
       provider.services.database?.addColumn?.("public.orders", {
         name: "id2",
         dataType: "uuid",

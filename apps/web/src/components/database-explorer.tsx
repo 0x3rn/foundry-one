@@ -114,8 +114,13 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [newTableName, setNewTableName] = useState("");
   const [newTableColumn, setNewTableColumn] = useState("");
   const [newTableType, setNewTableType] = useState("text");
+  const [newTableNullable, setNewTableNullable] = useState(false);
+  const [newTablePrimaryKey, setNewTablePrimaryKey] = useState(false);
+  const [newTableDefault, setNewTableDefault] = useState("");
   const [newColumnName, setNewColumnName] = useState("");
   const [newColumnType, setNewColumnType] = useState("text");
+  const [newColumnNullable, setNewColumnNullable] = useState(true);
+  const [newColumnDefault, setNewColumnDefault] = useState("");
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [newRowValues, setNewRowValues] = useState<RowEditorInput>({});
@@ -581,7 +586,15 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
           operation: "create-table",
           schema: "public",
           table,
-          columns: [{ name: column, dataType: newTableType, nullable: false }],
+          columns: [
+            {
+              name: column,
+              dataType: newTableType,
+              nullable: newTablePrimaryKey ? false : newTableNullable,
+              ...(newTablePrimaryKey ? { isPrimaryKey: true } : {}),
+              ...(newTableDefault.trim() ? { defaultValue: newTableDefault.trim() } : {}),
+            },
+          ],
         }),
       });
       const body = (await response.json()) as ApiResponse<DatabaseTable>;
@@ -589,6 +602,9 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         throw new Error(body.error?.message ?? "The table could not be created.");
       setNewTableName("");
       setNewTableColumn("");
+      setNewTableDefault("");
+      setNewTableNullable(false);
+      setNewTablePrimaryKey(false);
       setSelectedTable(body.data.id);
       setReloadToken((current) => current + 1);
     } catch (caught) {
@@ -614,13 +630,20 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         body: JSON.stringify({
           operation: "add-column",
           table: selectedTable,
-          column: { name: column, dataType: newColumnType, nullable: true },
+          column: {
+            name: column,
+            dataType: newColumnType,
+            nullable: newColumnNullable,
+            ...(newColumnDefault.trim() ? { defaultValue: newColumnDefault.trim() } : {}),
+          },
         }),
       });
       const body = (await response.json()) as ApiResponse<DatabaseColumn>;
       if (!response.ok || !body.data)
         throw new Error(body.error?.message ?? "The column could not be added.");
       setNewColumnName("");
+      setNewColumnDefault("");
+      setNewColumnNullable(true);
       setReloadToken((current) => current + 1);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The column could not be added.");
@@ -668,6 +691,29 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
             <option value="uuid">uuid</option>
             <option value="timestamp with time zone">timestamp with time zone</option>
           </select>
+          <label>
+            <input
+              type="checkbox"
+              checked={newTableNullable}
+              disabled={newTablePrimaryKey}
+              onChange={(event) => setNewTableNullable(event.target.checked)}
+            />
+            nullable
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={newTablePrimaryKey}
+              onChange={(event) => setNewTablePrimaryKey(event.target.checked)}
+            />
+            primary key
+          </label>
+          <input
+            value={newTableDefault}
+            onChange={(event) => setNewTableDefault(event.target.value)}
+            placeholder="default (optional)"
+            aria-label="New table column default"
+          />
           <button type="submit" disabled={isSchemaSaving}>
             Create
           </button>
@@ -690,6 +736,20 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
               <option value="uuid">uuid</option>
               <option value="timestamp with time zone">timestamp with time zone</option>
             </select>
+            <label>
+              <input
+                type="checkbox"
+                checked={newColumnNullable}
+                onChange={(event) => setNewColumnNullable(event.target.checked)}
+              />
+              nullable
+            </label>
+            <input
+              value={newColumnDefault}
+              onChange={(event) => setNewColumnDefault(event.target.value)}
+              placeholder="default (optional)"
+              aria-label="New column default"
+            />
             <button type="submit" disabled={isSchemaSaving}>
               Add
             </button>
