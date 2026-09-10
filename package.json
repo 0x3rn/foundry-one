@@ -35,6 +35,7 @@
     "test:database-transfer": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-database-transfer.ts",
     "test:database-row-editor": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-database-row-editor.ts",
     "test:database-schema-editor": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-database-schema-editor.ts",
+    "test:database-live": "node --import ./scripts/test-runtime-shim.mjs --import tsx scripts/test-live-database-explorer.ts",
     "test:confirmation-challenge": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-confirmation-challenge-store.ts",
     "test:provider-contracts": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-provider-contracts.ts",
     "test:ui-primitives": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-ui-primitives.ts",

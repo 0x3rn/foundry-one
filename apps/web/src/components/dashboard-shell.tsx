@@ -107,6 +107,21 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
+function formatDateOnly(value: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(value);
+}
+
 export function DashboardShell({
   user,
   workspaceId,
@@ -685,7 +700,7 @@ export function DashboardShell({
                   </strong>
                   <p>
                     {selectedProject.connections[0]?.lastCheckedAt
-                      ? `Last checked ${new Date(selectedProject.connections[0].lastCheckedAt).toLocaleString()}`
+                      ? `Last checked ${formatDateTime(selectedProject.connections[0].lastCheckedAt)}`
                       : "This connection has not completed a health check yet."}
                   </p>
                 </div>
@@ -737,7 +752,7 @@ export function DashboardShell({
                     <strong>
                       {tokenDaysRemaining !== undefined && tokenDaysRemaining < 0
                         ? "Generate a new Supabase token to restore metadata checks."
-                        : `This token expires ${tokenExpiry.toLocaleDateString()}.`}
+                        : `This token expires ${formatDateOnly(tokenExpiry)}.`}
                     </strong>
                     <p>
                       Foundry keeps the connection encrypted, but it cannot refresh a Supabase
