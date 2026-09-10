@@ -344,6 +344,18 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     dataType: "text",
     nullable: true,
   });
+  await provider.services.database?.alterColumn?.("public.orders", "notes", {
+    dataType: "varchar(120)",
+    nullable: false,
+    defaultValue: "'n/a'",
+  });
+  assert.ok(
+    executedQueries.some((query) =>
+      query.includes(
+        'ALTER TABLE "public"."orders" ALTER COLUMN "notes" TYPE varchar(120), ALTER COLUMN "notes" SET NOT NULL, ALTER COLUMN "notes" SET DEFAULT \'n/a\'',
+      ),
+    ),
+  );
   const createdIndex = await provider.services.database?.createIndex?.("public.orders", {
     name: "orders_label_idx",
     column: "label",
@@ -367,6 +379,13 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
       provider.services.database?.createTable?.("public", "unsafe", [
         { name: "value", dataType: "money; DROP TABLE users", nullable: true },
       ]),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
+  await assert.rejects(
+    () =>
+      provider.services.database?.alterColumn?.("public.orders", "notes", {
+        defaultValue: "now(); DROP TABLE users",
+      }),
     (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
   );
   await assert.rejects(

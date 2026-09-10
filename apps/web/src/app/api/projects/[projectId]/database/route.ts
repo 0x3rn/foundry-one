@@ -11,6 +11,7 @@ import { createKeyringFromEnvironment, CredentialVault, VaultError } from "@foun
 import {
   ProviderError,
   ProviderLifecycle,
+  type DatabaseColumnAlteration,
   type DatabaseColumnDefinition,
   type DatabaseIndexDefinition,
   type DatabaseRowQuery,
@@ -141,6 +142,7 @@ function parseMutationBody(value: unknown): {
     | "prepare-bulk-delete"
     | "create-table"
     | "add-column"
+    | "alter-column"
     | "create-index";
   readonly table: string;
   readonly values?: ProviderRecord;
@@ -153,6 +155,8 @@ function parseMutationBody(value: unknown): {
   readonly schema?: string;
   readonly columns?: readonly DatabaseColumnDefinition[];
   readonly column?: DatabaseColumnDefinition;
+  readonly columnName?: string;
+  readonly changes?: DatabaseColumnAlteration;
   readonly index?: DatabaseIndexDefinition;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -171,12 +175,13 @@ function parseMutationBody(value: unknown): {
         "prepare-bulk-delete",
         "create-table",
         "add-column",
+        "alter-column",
         "create-index",
       ] as readonly unknown[]
     ).includes(body.operation)
   ) {
     throw new SupabaseCredentialError(
-      "operation must be insert, update, bulk-update, delete, prepare-delete, bulk-delete, prepare-bulk-delete, create-table, add-column, or create-index.",
+      "operation must be insert, update, bulk-update, delete, prepare-delete, bulk-delete, prepare-bulk-delete, create-table, add-column, alter-column, or create-index.",
     );
   }
   if (typeof body.table !== "string" || !body.table.trim()) {
@@ -201,6 +206,44 @@ function parseMutationBody(value: unknown): {
         })()
       : undefined;
   const column = body.operation === "add-column" ? parseColumnDefinition(body.column) : undefined;
+  const columnName = body.operation === "alter-column" ? body.columnName : undefined;
+  if (body.operation === "alter-column" && (typeof columnName !== "string" || !columnName.trim())) {
+    throw new SupabaseCredentialError("alter-column requires a column name.");
+  }
+  const changes =
+    body.operation === "alter-column"
+      ? (() => {
+          if (!body.changes || typeof body.changes !== "object" || Array.isArray(body.changes)) {
+            throw new SupabaseCredentialError("alter-column requires changes.");
+          }
+          const candidate = body.changes as Record<string, unknown>;
+          if (
+            (candidate.dataType !== undefined && typeof candidate.dataType !== "string") ||
+            (candidate.nullable !== undefined && typeof candidate.nullable !== "boolean") ||
+            (candidate.defaultValue !== undefined &&
+              candidate.defaultValue !== null &&
+              typeof candidate.defaultValue !== "string")
+          ) {
+            throw new SupabaseCredentialError(
+              "Column changes may include a dataType, nullable flag, and default value.",
+            );
+          }
+          if (
+            !Object.hasOwn(candidate, "dataType") &&
+            !Object.hasOwn(candidate, "nullable") &&
+            !Object.hasOwn(candidate, "defaultValue")
+          ) {
+            throw new SupabaseCredentialError("At least one column change is required.");
+          }
+          return {
+            ...(candidate.dataType !== undefined ? { dataType: candidate.dataType } : {}),
+            ...(candidate.nullable !== undefined ? { nullable: candidate.nullable } : {}),
+            ...(Object.hasOwn(candidate, "defaultValue")
+              ? { defaultValue: candidate.defaultValue as string | null }
+              : {}),
+          };
+        })()
+      : undefined;
   const index =
     body.operation === "create-index"
       ? (() => {
@@ -289,6 +332,7 @@ function parseMutationBody(value: unknown): {
       | "prepare-bulk-delete"
       | "create-table"
       | "add-column"
+      | "alter-column"
       | "create-index",
     table: body.table.trim(),
     ...(normalizedValues ? { values: normalizedValues } : {}),
@@ -312,6 +356,8 @@ function parseMutationBody(value: unknown): {
     ...(typeof schema === "string" ? { schema: schema.trim() } : {}),
     ...(columns ? { columns } : {}),
     ...(column ? { column } : {}),
+    ...(typeof columnName === "string" ? { columnName: columnName.trim() } : {}),
+    ...(changes ? { changes } : {}),
     ...(index ? { index } : {}),
   };
 }
@@ -540,6 +586,13 @@ export async function POST(
     if (input.operation === "add-column" && !input.column) {
       return errorResponse("COLUMN_REQUIRED", "A column is required to alter a table.", 400);
     }
+    if (input.operation === "alter-column" && (!input.columnName || !input.changes)) {
+      return errorResponse(
+        "COLUMN_CHANGE_REQUIRED",
+        "A column name and changes are required.",
+        400,
+      );
+    }
     if (input.operation === "create-index" && !input.index) {
       return errorResponse("INDEX_REQUIRED", "An index definition is required.", 400);
     }
@@ -602,6 +655,7 @@ export async function POST(
         ? "row.delete"
         : input.operation === "create-table" ||
             input.operation === "add-column" ||
+            input.operation === "alter-column" ||
             input.operation === "create-index"
           ? `database.schema.${input.operation}`
           : `database.row.${input.operation}`;
@@ -629,6 +683,7 @@ export async function POST(
         resourceType:
           input.operation === "create-table" ||
           input.operation === "add-column" ||
+          input.operation === "alter-column" ||
           input.operation === "create-index"
             ? "database_schema"
             : "database_row",
@@ -717,6 +772,21 @@ export async function POST(
               );
             }
             return service.addColumn(input.table, input.column as NonNullable<typeof input.column>);
+          }
+          if (input.operation === "alter-column") {
+            if (!service.alterColumn) {
+              throw new ProviderError(
+                "capability_unsupported",
+                "This connection does not support column alterations.",
+                { provider: "supabase", operation: "database.schema.alter-column" },
+              );
+            }
+            await service.alterColumn(
+              input.table,
+              input.columnName as string,
+              input.changes as NonNullable<typeof input.changes>,
+            );
+            return { updated: true };
           }
           if (input.operation === "create-index") {
             if (!service.createIndex) {

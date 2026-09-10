@@ -113,6 +113,12 @@ export interface DatabaseColumnDefinition {
   };
 }
 
+export interface DatabaseColumnAlteration {
+  readonly dataType?: string;
+  readonly nullable?: boolean;
+  readonly defaultValue?: string | null;
+}
+
 export interface NormalizedUser {
   readonly id: string;
   readonly email: string;
@@ -206,6 +212,7 @@ export interface DatabaseProvider {
     columns: readonly DatabaseColumnDefinition[],
   ): Promise<NormalizedTable>;
   addColumn?(table: string, column: DatabaseColumnDefinition): Promise<NormalizedColumn>;
+  alterColumn?(table: string, column: string, changes: DatabaseColumnAlteration): Promise<void>;
   createIndex?(table: string, index: DatabaseIndexDefinition): Promise<DatabaseIndex>;
   insertRow?(table: string, values: ProviderRecord): Promise<NormalizedRow>;
   updateRow?(

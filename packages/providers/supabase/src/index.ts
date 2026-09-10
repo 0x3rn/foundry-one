@@ -7,6 +7,7 @@ import type {
   BackendProviderFactory,
   DatabaseConstraint,
   DatabaseCatalog,
+  DatabaseColumnAlteration,
   DatabaseColumnDefinition,
   DatabaseExtension,
   DatabaseFunction,
@@ -461,6 +462,37 @@ function createDatabaseProvider(
         isIdentity: false,
         ...(normalizedColumn.defaultValue ? { defaultValue: normalizedColumn.defaultValue } : {}),
       };
+    },
+    async alterColumn(table, column, changes: DatabaseColumnAlteration): Promise<void> {
+      const reference = splitTableReference(table);
+      const statements: string[] = [];
+      const quotedColumn = quoteIdentifier(column);
+      if (changes.dataType !== undefined) {
+        statements.push(`ALTER COLUMN ${quotedColumn} TYPE ${validateDataType(changes.dataType)}`);
+      }
+      if (changes.nullable !== undefined) {
+        statements.push(
+          `ALTER COLUMN ${quotedColumn} ${changes.nullable ? "DROP NOT NULL" : "SET NOT NULL"}`,
+        );
+      }
+      if (changes.defaultValue !== undefined) {
+        const defaultValue = validateDefaultValue(changes.defaultValue ?? undefined);
+        statements.push(
+          defaultValue
+            ? `ALTER COLUMN ${quotedColumn} SET DEFAULT ${defaultValue}`
+            : `ALTER COLUMN ${quotedColumn} DROP DEFAULT`,
+        );
+      }
+      if (statements.length === 0) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "At least one column alteration is required.",
+          { provider: "supabase", operation: "alter PostgreSQL column" },
+        );
+      }
+      await client.query(
+        `ALTER TABLE ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} ${statements.join(", ")}`,
+      );
     },
     async createIndex(table, index: DatabaseIndexDefinition): Promise<DatabaseIndex> {
       const reference = splitTableReference(table);

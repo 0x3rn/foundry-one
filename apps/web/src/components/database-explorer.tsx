@@ -154,6 +154,10 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [newColumnUnique, setNewColumnUnique] = useState(false);
   const [newColumnDefault, setNewColumnDefault] = useState("");
   const [newColumnReference, setNewColumnReference] = useState("");
+  const [alterColumnName, setAlterColumnName] = useState("");
+  const [alterColumnType, setAlterColumnType] = useState("text");
+  const [alterColumnNullable, setAlterColumnNullable] = useState(true);
+  const [alterColumnDefault, setAlterColumnDefault] = useState("");
   const [newIndexName, setNewIndexName] = useState("");
   const [newIndexColumn, setNewIndexColumn] = useState("");
   const [newIndexUnique, setNewIndexUnique] = useState(false);
@@ -761,6 +765,41 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     }
   }
 
+  async function alterColumn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTable || !alterColumnName) {
+      setError("Choose a column before modifying it.");
+      return;
+    }
+    setIsSchemaSaving(true);
+    setError(undefined);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "alter-column",
+          table: selectedTable,
+          columnName: alterColumnName,
+          changes: {
+            dataType: alterColumnType,
+            nullable: alterColumnNullable,
+            defaultValue: alterColumnDefault.trim() || null,
+          },
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<{ updated: boolean }>;
+      if (!response.ok || !body.data) {
+        throw new Error(body.error?.message ?? "The column could not be modified.");
+      }
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The column could not be modified.");
+    } finally {
+      setIsSchemaSaving(false);
+    }
+  }
+
   const selectableRows = rows.filter((row) => row.identity);
   const allVisibleRowsSelected =
     selectableRows.length > 0 && selectableRows.every((row) => selectedRowIds.has(row.id));
@@ -982,6 +1021,59 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
             </label>
             <button type="submit" disabled={isSchemaSaving}>
               Create index
+            </button>
+          </form>
+        ) : null}
+        {selectedTable && columns.length > 0 ? (
+          <form onSubmit={alterColumn}>
+            <strong>Modify column</strong>
+            <select
+              value={alterColumnName}
+              onChange={(event) => {
+                const column = columns.find((candidate) => candidate.name === event.target.value);
+                setAlterColumnName(event.target.value);
+                if (column) {
+                  setAlterColumnType(column.dataType);
+                  setAlterColumnNullable(column.nullable);
+                  setAlterColumnDefault(column.defaultValue ?? "");
+                }
+              }}
+              aria-label="Column to modify"
+            >
+              <option value="">choose column</option>
+              {columns.map((column) => (
+                <option key={column.id} value={column.name}>
+                  {column.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={alterColumnType}
+              onChange={(event) => setAlterColumnType(event.target.value)}
+              aria-label="Modified column type"
+            >
+              <option value="text">text</option>
+              <option value="integer">integer</option>
+              <option value="boolean">boolean</option>
+              <option value="uuid">uuid</option>
+              <option value="timestamp with time zone">timestamp with time zone</option>
+            </select>
+            <label>
+              <input
+                type="checkbox"
+                checked={alterColumnNullable}
+                onChange={(event) => setAlterColumnNullable(event.target.checked)}
+              />
+              nullable
+            </label>
+            <input
+              value={alterColumnDefault}
+              onChange={(event) => setAlterColumnDefault(event.target.value)}
+              placeholder="default (blank clears)"
+              aria-label="Modified column default"
+            />
+            <button type="submit" disabled={isSchemaSaving || !alterColumnName}>
+              Modify
             </button>
           </form>
         ) : null}
