@@ -12,8 +12,10 @@ import type {
   DatabaseFunction,
   DatabaseIndex,
   DatabaseIndexDefinition,
+  DatabasePolicy,
   DatabaseRelation,
   DatabaseRowQuery,
+  DatabaseTableStatistics,
   DatabaseTableDetails,
   DatabaseProvider,
   NormalizedFile,
@@ -220,6 +222,11 @@ function asRecords(value: unknown): readonly Record<string, unknown>[] {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function asFiniteNumber(value: unknown): number {
+  const normalized = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(normalized) ? normalized : 0;
 }
 
 function quoteIdentifier(value: string): string {
@@ -571,7 +578,7 @@ function createDatabaseProvider(
     },
     async describeTable(table): Promise<DatabaseTableDetails> {
       const reference = splitTableReference(table);
-      const [indexes, constraints, relations, triggers] = await Promise.all([
+      const [indexes, constraints, relations, triggers, policies, statistics] = await Promise.all([
         client.query<{ indexname: string; indexdef: string }>(
           `SELECT indexname, indexdef
            FROM pg_indexes
@@ -617,6 +624,41 @@ function createDatabaseProvider(
            ORDER BY trigger_name`,
           [reference.schema, reference.table],
         ),
+        client.query<{
+          policyname: string;
+          cmd: string;
+          roles: string[];
+          qual: string | null;
+          with_check: string | null;
+        }>(
+          `SELECT policyname, cmd, roles, qual, with_check
+           FROM pg_policies
+           WHERE schemaname = $1 AND tablename = $2
+           ORDER BY policyname`,
+          [reference.schema, reference.table],
+        ),
+        client.query<{
+          estimated_row_count: number | string | null;
+          live_row_count: number | string | null;
+          dead_row_count: number | string | null;
+          total_bytes: number | string | null;
+          last_vacuum: string | null;
+          last_analyze: string | null;
+        }>(
+          `SELECT c.reltuples AS estimated_row_count,
+                  COALESCE(s.n_live_tup, 0) AS live_row_count,
+                  COALESCE(s.n_dead_tup, 0) AS dead_row_count,
+                  pg_total_relation_size(c.oid) AS total_bytes,
+                  s.last_vacuum::text,
+                  s.last_analyze::text
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           LEFT JOIN pg_stat_user_tables s
+             ON s.relid = c.oid
+           WHERE n.nspname = $1 AND c.relname = $2
+           LIMIT 1`,
+          [reference.schema, reference.table],
+        ),
       ]);
       const constraintType = (type: string): DatabaseConstraint["type"] =>
         (({ p: "primary_key", f: "foreign_key", u: "unique", c: "check", x: "exclusion" })[
@@ -660,6 +702,28 @@ function createDatabaseProvider(
           ([name, relation]) => ({ name, ...relation }) satisfies DatabaseRelation,
         ),
         triggers: triggers.map((trigger) => trigger.trigger_name),
+        policies: policies.map(
+          (policy) =>
+            ({
+              name: policy.policyname,
+              command: policy.cmd,
+              roles: policy.roles,
+              ...(policy.qual ? { usingExpression: policy.qual } : {}),
+              ...(policy.with_check ? { checkExpression: policy.with_check } : {}),
+            }) satisfies DatabasePolicy,
+        ),
+        ...(statistics[0]
+          ? {
+              statistics: {
+                estimatedRowCount: asFiniteNumber(statistics[0].estimated_row_count),
+                liveRowCount: asFiniteNumber(statistics[0].live_row_count),
+                deadRowCount: asFiniteNumber(statistics[0].dead_row_count),
+                totalBytes: asFiniteNumber(statistics[0].total_bytes),
+                ...(statistics[0].last_vacuum ? { lastVacuum: statistics[0].last_vacuum } : {}),
+                ...(statistics[0].last_analyze ? { lastAnalyze: statistics[0].last_analyze } : {}),
+              } satisfies DatabaseTableStatistics,
+            }
+          : {}),
       };
     },
     async listRows(table, query): Promise<ProviderPage<NormalizedRow>> {

@@ -200,6 +200,29 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
       if (query.includes("information_schema.triggers")) {
         return [{ trigger_name: "orders_updated_at" }];
       }
+      if (query.includes("FROM pg_policies")) {
+        return [
+          {
+            policyname: "orders_read",
+            cmd: "SELECT",
+            roles: ["authenticated"],
+            qual: "(tenant_id = auth.uid())",
+            with_check: null,
+          },
+        ];
+      }
+      if (query.includes("pg_stat_user_tables")) {
+        return [
+          {
+            estimated_row_count: "50",
+            live_row_count: "48",
+            dead_row_count: "2",
+            total_bytes: "8192",
+            last_vacuum: "2026-09-10 06:00:00+00",
+            last_analyze: null,
+          },
+        ];
+      }
       if (query.includes("information_schema.key_column_usage")) {
         return [{ column_name: "id" }];
       }
@@ -271,6 +294,21 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     constraints: [{ name: "orders_pkey", type: "primary_key", definition: "PRIMARY KEY (id)" }],
     relations: [],
     triggers: ["orders_updated_at"],
+    policies: [
+      {
+        name: "orders_read",
+        command: "SELECT",
+        roles: ["authenticated"],
+        usingExpression: "(tenant_id = auth.uid())",
+      },
+    ],
+    statistics: {
+      estimatedRowCount: 50,
+      liveRowCount: 48,
+      deadRowCount: 2,
+      totalBytes: 8192,
+      lastVacuum: "2026-09-10 06:00:00+00",
+    },
   });
   await provider.services.database?.createTable?.("public", "invoices", [
     {

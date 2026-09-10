@@ -423,6 +423,7 @@ export async function GET(
                 constraints: [],
                 relations: [],
                 triggers: [],
+                policies: [],
               }
             );
           return service.listRows(resource.table as string, resource.query);

@@ -57,6 +57,21 @@ interface DatabaseTableDetails {
     readonly referencedColumns: readonly string[];
   }[];
   readonly triggers: readonly string[];
+  readonly policies: readonly {
+    readonly name: string;
+    readonly command: string;
+    readonly roles: readonly string[];
+    readonly usingExpression?: string;
+    readonly checkExpression?: string;
+  }[];
+  readonly statistics?: {
+    readonly estimatedRowCount: number;
+    readonly liveRowCount: number;
+    readonly deadRowCount: number;
+    readonly totalBytes: number;
+    readonly lastVacuum?: string;
+    readonly lastAnalyze?: string;
+  };
 }
 
 interface DatabaseCatalog {
@@ -80,7 +95,8 @@ interface DatabaseExplorerProps {
   readonly projectId: string;
 }
 
-type DatabaseDetailTab = "data" | "structure" | "indexes" | "relations" | "activity";
+type DatabaseDetailTab =
+  "data" | "structure" | "indexes" | "relations" | "policies" | "activity" | "statistics";
 type TableColumnDraft = SchemaColumnDraft & { readonly id: number };
 
 interface ApiResponse<T> {
@@ -1137,6 +1153,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                   <span>Indexes {details.indexes.length}</span>
                   <span>Constraints {details.constraints.length}</span>
                   <span>Relations {details.relations.length}</span>
+                  <span>Policies {details.policies.length}</span>
                   <span>Triggers {details.triggers.length}</span>
                 </div>
                 <div className="foundry-database-tabs" role="tablist" aria-label="Table details">
@@ -1146,7 +1163,9 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                       ["structure", "Structure"],
                       ["indexes", "Indexes"],
                       ["relations", "Relations"],
+                      ["policies", "Policies"],
                       ["activity", "Activity"],
+                      ["statistics", "Statistics"],
                     ] as const
                   ).map(([tab, label]) => (
                     <button
@@ -1437,6 +1456,77 @@ function DatabaseDetailPanel({
       </div>
     );
   }
+  if (tab === "policies") {
+    return (
+      <div className="foundry-database-detail-panel" role="tabpanel">
+        <h4>Row-level security policies</h4>
+        {details.policies.length === 0 ? (
+          <p className="foundry-database-empty">No policies reported for this table.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Command</th>
+                <th>Roles</th>
+                <th>Using</th>
+                <th>With check</th>
+              </tr>
+            </thead>
+            <tbody>
+              {details.policies.map((policy) => (
+                <tr key={policy.name}>
+                  <td>{policy.name}</td>
+                  <td>{policy.command}</td>
+                  <td>{policy.roles.join(", ") || "—"}</td>
+                  <td>{policy.usingExpression ?? "—"}</td>
+                  <td>{policy.checkExpression ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    );
+  }
+  if (tab === "statistics") {
+    const statistics = details.statistics;
+    return (
+      <div className="foundry-database-detail-panel" role="tabpanel">
+        <h4>Table statistics</h4>
+        {!statistics ? (
+          <p className="foundry-database-empty">Statistics are not available for this table.</p>
+        ) : (
+          <dl className="foundry-database-statistics">
+            <div>
+              <dt>Estimated rows</dt>
+              <dd>{statistics.estimatedRowCount.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Live rows</dt>
+              <dd>{statistics.liveRowCount.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Dead rows</dt>
+              <dd>{statistics.deadRowCount.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Total size</dt>
+              <dd>{formatBytes(statistics.totalBytes)}</dd>
+            </div>
+            <div>
+              <dt>Last vacuum</dt>
+              <dd>{statistics.lastVacuum ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Last analyze</dt>
+              <dd>{statistics.lastAnalyze ?? "—"}</dd>
+            </div>
+          </dl>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="foundry-database-detail-panel" role="tabpanel">
       <h4>Activity</h4>
@@ -1451,6 +1541,13 @@ function DatabaseDetailPanel({
       )}
     </div>
   );
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function formatCell(value: string | number | boolean | null | string[] | undefined): string {

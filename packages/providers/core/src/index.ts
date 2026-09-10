@@ -50,11 +50,30 @@ export interface DatabaseRelation {
   readonly referencedColumns: readonly string[];
 }
 
+export interface DatabasePolicy {
+  readonly name: string;
+  readonly command: string;
+  readonly roles: readonly string[];
+  readonly usingExpression?: string;
+  readonly checkExpression?: string;
+}
+
+export interface DatabaseTableStatistics {
+  readonly estimatedRowCount: number;
+  readonly liveRowCount: number;
+  readonly deadRowCount: number;
+  readonly totalBytes: number;
+  readonly lastVacuum?: string;
+  readonly lastAnalyze?: string;
+}
+
 export interface DatabaseTableDetails {
   readonly indexes: readonly DatabaseIndex[];
   readonly constraints: readonly DatabaseConstraint[];
   readonly relations: readonly DatabaseRelation[];
   readonly triggers: readonly string[];
+  readonly policies: readonly DatabasePolicy[];
+  readonly statistics?: DatabaseTableStatistics;
 }
 
 export interface DatabaseFunction {
