@@ -55,12 +55,24 @@ export function getAuth() {
     throw new AuthConfigurationError("BETTER_AUTH_SECRET must be at least 32 characters.");
   }
 
-  const trustedOrigins = (
-    process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000,http://localhost:3100"
+  const configuredTrustedOrigins = (
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS ??
+    "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3100"
   )
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+  const trustedOrigins =
+    process.env.NODE_ENV === "production"
+      ? configuredTrustedOrigins
+      : Array.from(
+          new Set([
+            ...configuredTrustedOrigins,
+            "http://localhost:3001",
+            "http://localhost:3002",
+            "http://localhost:3003",
+          ]),
+        );
   const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
 
   return betterAuth({
