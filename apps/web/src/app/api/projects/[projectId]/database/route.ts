@@ -12,6 +12,7 @@ import {
   ProviderError,
   ProviderLifecycle,
   type DatabaseColumnDefinition,
+  type DatabaseIndexDefinition,
   type DatabaseRowQuery,
   type ProviderRecord,
   type ProviderScalar,
@@ -139,7 +140,8 @@ function parseMutationBody(value: unknown): {
     | "bulk-delete"
     | "prepare-bulk-delete"
     | "create-table"
-    | "add-column";
+    | "add-column"
+    | "create-index";
   readonly table: string;
   readonly values?: ProviderRecord;
   readonly identity?: { readonly column: string; readonly value: ProviderScalar };
@@ -151,6 +153,7 @@ function parseMutationBody(value: unknown): {
   readonly schema?: string;
   readonly columns?: readonly DatabaseColumnDefinition[];
   readonly column?: DatabaseColumnDefinition;
+  readonly index?: DatabaseIndexDefinition;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new SupabaseCredentialError("Database mutation input must be a JSON object.");
@@ -168,11 +171,12 @@ function parseMutationBody(value: unknown): {
         "prepare-bulk-delete",
         "create-table",
         "add-column",
+        "create-index",
       ] as readonly unknown[]
     ).includes(body.operation)
   ) {
     throw new SupabaseCredentialError(
-      "operation must be insert, update, bulk-update, delete, prepare-delete, bulk-delete, prepare-bulk-delete, create-table, or add-column.",
+      "operation must be insert, update, bulk-update, delete, prepare-delete, bulk-delete, prepare-bulk-delete, create-table, add-column, or create-index.",
     );
   }
   if (typeof body.table !== "string" || !body.table.trim()) {
@@ -197,6 +201,29 @@ function parseMutationBody(value: unknown): {
         })()
       : undefined;
   const column = body.operation === "add-column" ? parseColumnDefinition(body.column) : undefined;
+  const index =
+    body.operation === "create-index"
+      ? (() => {
+          if (!body.index || typeof body.index !== "object" || Array.isArray(body.index)) {
+            throw new SupabaseCredentialError("create-index requires an index definition.");
+          }
+          const candidate = body.index as Record<string, unknown>;
+          if (
+            typeof candidate.column !== "string" ||
+            typeof candidate.isUnique !== "boolean" ||
+            (candidate.name !== undefined && typeof candidate.name !== "string")
+          ) {
+            throw new SupabaseCredentialError(
+              "An index needs a column, a unique flag, and an optional name.",
+            );
+          }
+          return {
+            column: candidate.column,
+            isUnique: candidate.isUnique,
+            ...(candidate.name !== undefined ? { name: candidate.name } : {}),
+          };
+        })()
+      : undefined;
   const values = body.values;
   if (values !== undefined && (!values || typeof values !== "object" || Array.isArray(values))) {
     throw new SupabaseCredentialError("values must be an object when provided.");
@@ -261,7 +288,8 @@ function parseMutationBody(value: unknown): {
       | "bulk-delete"
       | "prepare-bulk-delete"
       | "create-table"
-      | "add-column",
+      | "add-column"
+      | "create-index",
     table: body.table.trim(),
     ...(normalizedValues ? { values: normalizedValues } : {}),
     ...(normalizedIdentity
@@ -284,6 +312,7 @@ function parseMutationBody(value: unknown): {
     ...(typeof schema === "string" ? { schema: schema.trim() } : {}),
     ...(columns ? { columns } : {}),
     ...(column ? { column } : {}),
+    ...(index ? { index } : {}),
   };
 }
 
@@ -510,6 +539,9 @@ export async function POST(
     if (input.operation === "add-column" && !input.column) {
       return errorResponse("COLUMN_REQUIRED", "A column is required to alter a table.", 400);
     }
+    if (input.operation === "create-index" && !input.index) {
+      return errorResponse("INDEX_REQUIRED", "An index definition is required.", 400);
+    }
     const values = input.values ?? {};
 
     const client = createDatabaseClient();
@@ -567,7 +599,9 @@ export async function POST(
     const action =
       input.operation === "delete" || input.operation === "bulk-delete"
         ? "row.delete"
-        : input.operation === "create-table" || input.operation === "add-column"
+        : input.operation === "create-table" ||
+            input.operation === "add-column" ||
+            input.operation === "create-index"
           ? `database.schema.${input.operation}`
           : `database.row.${input.operation}`;
 
@@ -592,7 +626,9 @@ export async function POST(
           : {}),
         provider: "supabase",
         resourceType:
-          input.operation === "create-table" || input.operation === "add-column"
+          input.operation === "create-table" ||
+          input.operation === "add-column" ||
+          input.operation === "create-index"
             ? "database_schema"
             : "database_row",
         resourceId: input.identity?.column ?? input.table,
@@ -680,6 +716,16 @@ export async function POST(
               );
             }
             return service.addColumn(input.table, input.column as NonNullable<typeof input.column>);
+          }
+          if (input.operation === "create-index") {
+            if (!service.createIndex) {
+              throw new ProviderError(
+                "capability_unsupported",
+                "This connection does not support index creation.",
+                { provider: "supabase", operation: "database.schema.create-index" },
+              );
+            }
+            return service.createIndex(input.table, input.index as NonNullable<typeof input.index>);
           }
           if (input.operation === "insert") {
             if (!service.insertRow) {

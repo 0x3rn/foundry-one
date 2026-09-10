@@ -11,6 +11,7 @@ import type {
   DatabaseExtension,
   DatabaseFunction,
   DatabaseIndex,
+  DatabaseIndexDefinition,
   DatabaseRelation,
   DatabaseRowQuery,
   DatabaseTableDetails,
@@ -451,6 +452,26 @@ function createDatabaseProvider(
         isPrimaryKey: false,
         isIdentity: false,
         ...(normalizedColumn.defaultValue ? { defaultValue: normalizedColumn.defaultValue } : {}),
+      };
+    },
+    async createIndex(table, index: DatabaseIndexDefinition): Promise<DatabaseIndex> {
+      const reference = splitTableReference(table);
+      const quotedColumn = quoteIdentifier(index.column);
+      const indexName = index.name?.trim() || `${reference.table}_${index.column}_idx`;
+      if (indexName.length > 63) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "PostgreSQL index names must be 63 characters or fewer.",
+          { provider: "supabase", operation: "validate PostgreSQL index" },
+        );
+      }
+      const definition = `CREATE ${index.isUnique ? "UNIQUE " : ""}INDEX ${quoteIdentifier(indexName)} ON ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} (${quotedColumn})`;
+      await client.query(definition);
+      return {
+        name: indexName,
+        definition,
+        isUnique: index.isUnique,
+        isPrimary: false,
       };
     },
     async listTables(): Promise<readonly NormalizedTable[]> {

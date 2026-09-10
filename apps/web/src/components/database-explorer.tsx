@@ -126,6 +126,9 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [newColumnUnique, setNewColumnUnique] = useState(false);
   const [newColumnDefault, setNewColumnDefault] = useState("");
   const [newColumnReference, setNewColumnReference] = useState("");
+  const [newIndexName, setNewIndexName] = useState("");
+  const [newIndexColumn, setNewIndexColumn] = useState("");
+  const [newIndexUnique, setNewIndexUnique] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [newRowValues, setNewRowValues] = useState<RowEditorInput>({});
@@ -679,6 +682,42 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     }
   }
 
+  async function createIndex(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTable || !newIndexColumn) {
+      setError("Choose a column before creating an index.");
+      return;
+    }
+    setIsSchemaSaving(true);
+    setError(undefined);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "create-index",
+          table: selectedTable,
+          index: {
+            column: newIndexColumn,
+            isUnique: newIndexUnique,
+            ...(newIndexName.trim() ? { name: newIndexName.trim() } : {}),
+          },
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<unknown>;
+      if (!response.ok || !body.data)
+        throw new Error(body.error?.message ?? "The index could not be created.");
+      setNewIndexName("");
+      setNewIndexColumn("");
+      setNewIndexUnique(false);
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The index could not be created.");
+    } finally {
+      setIsSchemaSaving(false);
+    }
+  }
+
   const selectableRows = rows.filter((row) => row.identity);
   const allVisibleRowsSelected =
     selectableRows.length > 0 && selectableRows.every((row) => selectedRowIds.has(row.id));
@@ -811,6 +850,40 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
             />
             <button type="submit" disabled={isSchemaSaving}>
               Add
+            </button>
+          </form>
+        ) : null}
+        {selectedTable && columns.length > 0 ? (
+          <form onSubmit={createIndex}>
+            <strong>New index</strong>
+            <select
+              value={newIndexColumn}
+              onChange={(event) => setNewIndexColumn(event.target.value)}
+              aria-label="Indexed column"
+            >
+              <option value="">choose column</option>
+              {columns.map((column) => (
+                <option key={column.id} value={column.name}>
+                  {column.name}
+                </option>
+              ))}
+            </select>
+            <input
+              value={newIndexName}
+              onChange={(event) => setNewIndexName(event.target.value)}
+              placeholder="index name (optional)"
+              aria-label="Index name"
+            />
+            <label>
+              <input
+                type="checkbox"
+                checked={newIndexUnique}
+                onChange={(event) => setNewIndexUnique(event.target.checked)}
+              />
+              unique
+            </label>
+            <button type="submit" disabled={isSchemaSaving}>
+              Create index
             </button>
           </form>
         ) : null}

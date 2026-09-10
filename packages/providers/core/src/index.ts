@@ -31,6 +31,12 @@ export interface DatabaseIndex {
   readonly isPrimary: boolean;
 }
 
+export interface DatabaseIndexDefinition {
+  readonly name?: string;
+  readonly column: string;
+  readonly isUnique: boolean;
+}
+
 export interface DatabaseConstraint {
   readonly name: string;
   readonly type: "primary_key" | "foreign_key" | "unique" | "check" | "exclusion" | "other";
@@ -175,6 +181,7 @@ export interface DatabaseProvider {
     columns: readonly DatabaseColumnDefinition[],
   ): Promise<NormalizedTable>;
   addColumn?(table: string, column: DatabaseColumnDefinition): Promise<NormalizedColumn>;
+  createIndex?(table: string, index: DatabaseIndexDefinition): Promise<DatabaseIndex>;
   insertRow?(table: string, values: ProviderRecord): Promise<NormalizedRow>;
   updateRow?(
     table: string,

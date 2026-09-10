@@ -293,6 +293,17 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     dataType: "text",
     nullable: true,
   });
+  const createdIndex = await provider.services.database?.createIndex?.("public.orders", {
+    name: "orders_label_idx",
+    column: "label",
+    isUnique: false,
+  });
+  assert.deepEqual(createdIndex, {
+    name: "orders_label_idx",
+    definition: 'CREATE INDEX "orders_label_idx" ON "public"."orders" ("label")',
+    isUnique: false,
+    isPrimary: false,
+  });
   assert.ok(executedQueries.some((query) => query.includes('CREATE TABLE "public"."invoices"')));
   assert.ok(
     executedQueries.some((query) =>
@@ -305,6 +316,15 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
       provider.services.database?.createTable?.("public", "unsafe", [
         { name: "value", dataType: "money; DROP TABLE users", nullable: true },
       ]),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
+  await assert.rejects(
+    () =>
+      provider.services.database?.createIndex?.("public.orders", {
+        name: "orders_label_idx; DROP TABLE users",
+        column: "label",
+        isUnique: true,
+      }),
     (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
   );
   await assert.rejects(
