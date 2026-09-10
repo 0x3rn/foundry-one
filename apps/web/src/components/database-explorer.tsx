@@ -7,6 +7,11 @@ import {
   parseTransferFile,
   type TransferRecord,
 } from "@/lib/database-transfer";
+import {
+  duplicateRowValues,
+  prepareRowInputValues,
+  type RowEditorInput,
+} from "@/lib/database-row-editor";
 
 interface DatabaseTable {
   readonly id: string;
@@ -97,6 +102,8 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isTableLoading, setIsTableLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSchemaSaving, setIsSchemaSaving] = useState(false);
@@ -107,6 +114,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [newColumnType, setNewColumnType] = useState("text");
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [newRowValues, setNewRowValues] = useState<RowEditorInput>({});
   const [error, setError] = useState<string>();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -225,6 +233,71 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   function cancelEditing() {
     setEditingRowId(undefined);
     setEditValues({});
+  }
+
+  function startCreating() {
+    setError(undefined);
+    setNewRowValues(
+      Object.fromEntries(
+        columns.filter((column) => !column.isIdentity).map((column) => [column.name, ""]),
+      ),
+    );
+    setIsCreating(true);
+  }
+
+  function cancelCreating() {
+    setIsCreating(false);
+    setNewRowValues({});
+  }
+
+  async function createRow(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTable) return;
+    setIsSaving(true);
+    setError(undefined);
+    try {
+      const values = prepareRowInputValues(columns, newRowValues);
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ operation: "insert", table: selectedTable, values }),
+      });
+      const body = (await response.json()) as ApiResponse<DatabaseRow>;
+      if (!response.ok || !body.data) {
+        throw new Error(body.error?.message ?? "The row could not be created.");
+      }
+      cancelCreating();
+      setIsTableLoading(true);
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The row could not be created.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function duplicateRow(row: DatabaseRow) {
+    if (!selectedTable) return;
+    setIsDuplicating(true);
+    setError(undefined);
+    try {
+      const values = duplicateRowValues(columns, row.values);
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ operation: "insert", table: selectedTable, values }),
+      });
+      const body = (await response.json()) as ApiResponse<DatabaseRow>;
+      if (!response.ok || !body.data) {
+        throw new Error(body.error?.message ?? "The row could not be duplicated.");
+      }
+      setIsTableLoading(true);
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The row could not be duplicated.");
+    } finally {
+      setIsDuplicating(false);
+    }
   }
 
   async function saveEditing(row: DatabaseRow) {
@@ -487,6 +560,69 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         </button>
         {search ? <span>Filtering for “{search}”</span> : <span>All rows</span>}
       </form>
+      {selectedTable && columns.length > 0 ? (
+        <div className="foundry-database-row-form">
+          {!isCreating ? (
+            <button type="button" onClick={startCreating} disabled={isTableLoading}>
+              + Add row
+            </button>
+          ) : (
+            <form onSubmit={createRow}>
+              <strong>Add row</strong>
+              <div className="foundry-database-row-fields">
+                {columns
+                  .filter((column) => !column.isIdentity)
+                  .map((column) => (
+                    <label key={column.id}>
+                      {column.name}
+                      {column.dataType.includes("boolean") ? (
+                        <select
+                          value={newRowValues[column.name] ?? ""}
+                          disabled={isSaving}
+                          onChange={(event) =>
+                            setNewRowValues((current) => ({
+                              ...current,
+                              [column.name]: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Use default / null</option>
+                          <option value="true">true</option>
+                          <option value="false">false</option>
+                        </select>
+                      ) : (
+                        <input
+                          value={newRowValues[column.name] ?? ""}
+                          inputMode={
+                            column.dataType.includes("int") || column.dataType.includes("numeric")
+                              ? "decimal"
+                              : undefined
+                          }
+                          placeholder={column.defaultValue ? "Use default" : undefined}
+                          disabled={isSaving}
+                          onChange={(event) =>
+                            setNewRowValues((current) => ({
+                              ...current,
+                              [column.name]: event.target.value,
+                            }))
+                          }
+                        />
+                      )}
+                    </label>
+                  ))}
+              </div>
+              <span className="foundry-database-row-actions">
+                <button type="submit" disabled={isSaving}>
+                  {isSaving ? "Creating…" : "Create row"}
+                </button>
+                <button type="button" disabled={isSaving} onClick={cancelCreating}>
+                  Cancel
+                </button>
+              </span>
+            </form>
+          )}
+        </div>
+      ) : null}
       {error ? <p className="foundry-database-error">{error}</p> : null}
       {isLoading ? (
         <p className="foundry-database-empty">Reading schemas and tables…</p>
@@ -590,6 +726,13 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                           <span className="foundry-database-row-actions">
                             <button type="button" onClick={() => startEditing(row)}>
                               Edit
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isDuplicating}
+                              onClick={() => duplicateRow(row)}
+                            >
+                              {isDuplicating ? "Duplicating…" : "Duplicate"}
                             </button>
                             <button
                               type="button"
