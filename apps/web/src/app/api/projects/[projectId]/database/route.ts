@@ -445,7 +445,30 @@ export async function GET(
           const credentials = vault.decrypt(storedConnection.credential);
           const provider = createSupabaseProvider(credentials);
           lifecycle = new ProviderLifecycle(provider);
-          await lifecycle.connect();
+          const connectionState = await lifecycle.connect();
+          if (connectionState.state === "disconnected") {
+            throw new ProviderError(
+              "provider_unavailable",
+              "The connected database is currently unavailable.",
+              {
+                provider: "supabase",
+                operation: `database.${resource.resource}.read`,
+                retryable: true,
+              },
+            );
+          }
+          const capabilities = await provider.getCapabilities();
+          if (!capabilities.relationalDatabase) {
+            throw new ProviderError(
+              "provider_unavailable",
+              "The connected database is currently unavailable.",
+              {
+                provider: "supabase",
+                operation: `database.${resource.resource}.read`,
+                retryable: true,
+              },
+            );
+          }
           const service = provider.services.database;
           if (!service) {
             throw new ProviderError(
@@ -695,7 +718,22 @@ export async function POST(
           const credentials = vault.decrypt(storedConnection.credential);
           const provider = createSupabaseProvider(credentials);
           lifecycle = new ProviderLifecycle(provider);
-          await lifecycle.connect();
+          const connectionState = await lifecycle.connect();
+          if (connectionState.state === "disconnected") {
+            throw new ProviderError(
+              "provider_unavailable",
+              "The connected database is currently unavailable.",
+              { provider: "supabase", operation: `database.${input.operation}`, retryable: true },
+            );
+          }
+          const capabilities = await provider.getCapabilities();
+          if (!capabilities.relationalDatabase) {
+            throw new ProviderError(
+              "provider_unavailable",
+              "The connected database is currently unavailable.",
+              { provider: "supabase", operation: `database.${input.operation}`, retryable: true },
+            );
+          }
           const service = provider.services.database;
           if (!service) {
             throw new ProviderError(

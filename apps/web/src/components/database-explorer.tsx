@@ -19,6 +19,7 @@ import {
   prepareSchemaColumnDraft,
   type SchemaColumnDraft,
 } from "@/lib/database-schema-editor";
+import { fetchDatabaseApi, type DatabaseApiResponse } from "@/lib/database-api";
 
 interface DatabaseTable {
   readonly id: string;
@@ -98,21 +99,14 @@ interface DatabaseExplorerProps {
   readonly projectId: string;
 }
 
+type ApiResponse<T> = DatabaseApiResponse<T>;
+
 type DatabaseDetailTab =
   "data" | "structure" | "indexes" | "relations" | "policies" | "activity" | "statistics";
 type TableColumnDraft = SchemaColumnDraft & { readonly id: number };
 
-interface ApiResponse<T> {
-  readonly data?: T;
-  readonly error?: { readonly message?: string };
-}
-
 async function readApi<T>(url: string): Promise<T> {
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  const body = (await response.json()) as ApiResponse<T>;
-  if (!response.ok || !body.data)
-    throw new Error(body.error?.message ?? "Database request failed.");
-  return body.data;
+  return fetchDatabaseApi<T>(url);
 }
 
 export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
@@ -1213,7 +1207,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       {error ? <p className="foundry-database-error">{error}</p> : null}
       {isLoading ? (
         <p className="foundry-database-empty">Reading schemas and tables…</p>
-      ) : tables.length === 0 ? (
+      ) : error ? null : tables.length === 0 ? (
         <p className="foundry-database-empty">No tables were returned for this connection.</p>
       ) : (
         <div className="foundry-database-grid">
