@@ -77,6 +77,7 @@ interface DatabaseTableDetails {
 }
 
 interface DatabaseCatalog {
+  readonly schemas: readonly { readonly name: string }[];
   readonly functions: readonly {
     readonly id: string;
     readonly schema: string;
@@ -777,6 +778,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         <div className="foundry-database-catalog" aria-label="Database catalog summary">
           <span>{catalog.functions.length} functions</span>
           <span>{catalog.extensions.length} extensions</span>
+          <span>{catalog.schemas.length} schemas</span>
         </div>
       ) : null}
       <div className="foundry-database-schema-tools">

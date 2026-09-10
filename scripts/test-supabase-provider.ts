@@ -175,6 +175,9 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
           },
         ];
       }
+      if (query.includes("information_schema.schemata")) {
+        return [{ schema_name: "public" }];
+      }
       if (query.includes("FROM pg_extension")) {
         return [{ extname: "pgcrypto", extversion: "1.3" }];
       }
@@ -269,6 +272,7 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     rowCount: 50,
   });
   assert.deepEqual(await provider.services.database?.describeCatalog?.(), {
+    schemas: [{ name: "public" }],
     functions: [
       {
         id: "public.recalculate_total.42",

@@ -89,7 +89,12 @@ export interface DatabaseExtension {
   readonly version: string;
 }
 
+export interface DatabaseSchema {
+  readonly name: string;
+}
+
 export interface DatabaseCatalog {
+  readonly schemas: readonly DatabaseSchema[];
   readonly functions: readonly DatabaseFunction[];
   readonly extensions: readonly DatabaseExtension[];
 }

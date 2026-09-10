@@ -413,7 +413,7 @@ export async function GET(
           }
           if (resource.resource === "tables") return service.listTables();
           if (resource.resource === "catalog")
-            return service.describeCatalog?.() ?? { functions: [], extensions: [] };
+            return service.describeCatalog?.() ?? { schemas: [], functions: [], extensions: [] };
           if (resource.resource === "columns")
             return service.listColumns?.(resource.table as string) ?? [];
           if (resource.resource === "details")

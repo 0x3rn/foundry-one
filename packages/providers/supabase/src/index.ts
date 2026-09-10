@@ -15,6 +15,7 @@ import type {
   DatabasePolicy,
   DatabaseRelation,
   DatabaseRowQuery,
+  DatabaseSchema,
   DatabaseTableStatistics,
   DatabaseTableDetails,
   DatabaseProvider,
@@ -550,7 +551,13 @@ function createDatabaseProvider(
       }));
     },
     async describeCatalog(): Promise<DatabaseCatalog> {
-      const [functions, extensions] = await Promise.all([
+      const [schemas, functions, extensions] = await Promise.all([
+        client.query<{ schema_name: string }>(
+          `SELECT schema_name
+           FROM information_schema.schemata
+           WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
+           ORDER BY schema_name`,
+        ),
         client.query<{
           oid: number;
           schema_name: string;
@@ -573,6 +580,7 @@ function createDatabaseProvider(
         ),
       ]);
       return {
+        schemas: schemas.map((schema) => ({ name: schema.schema_name }) satisfies DatabaseSchema),
         functions: functions.map(
           (item) =>
             ({
