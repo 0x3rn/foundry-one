@@ -10,6 +10,7 @@ export interface StoredProviderConnection {
   readonly status: ProviderConnectionState;
   readonly capabilities?: ProviderCapabilities;
   readonly lastCheckedAt?: string;
+  readonly managementApiTokenExpiresAt?: string;
   readonly credential: EncryptedEnvelope;
 }
 
@@ -21,6 +22,7 @@ export interface PublicProviderConnection {
   readonly status: ProviderConnectionState;
   readonly capabilities?: ProviderCapabilities;
   readonly lastCheckedAt?: string;
+  readonly managementApiTokenExpiresAt?: string;
 }
 
 export interface ProviderConnectionStore {
@@ -32,7 +34,12 @@ export interface ProviderConnectionStore {
     input: Partial<
       Pick<
         StoredProviderConnection,
-        "name" | "status" | "capabilities" | "lastCheckedAt" | "credential"
+        | "name"
+        | "status"
+        | "capabilities"
+        | "lastCheckedAt"
+        | "managementApiTokenExpiresAt"
+        | "credential"
       >
     >,
   ): Promise<StoredProviderConnection>;
@@ -44,11 +51,13 @@ export interface CreateProviderConnectionInput {
   readonly name: string;
   readonly provider: ProviderName;
   readonly credentials: Readonly<Record<string, string>>;
+  readonly managementApiTokenExpiresAt?: string;
 }
 
 export interface UpdateProviderConnectionInput {
   readonly name?: string;
   readonly credentials?: Readonly<Record<string, string>>;
+  readonly managementApiTokenExpiresAt?: string;
 }
 
 export class ConnectionNotFoundError extends Error {
@@ -69,6 +78,9 @@ function toPublicConnection(connection: StoredProviderConnection): PublicProvide
     status: connection.status,
     ...(connection.capabilities ? { capabilities: connection.capabilities } : {}),
     ...(connection.lastCheckedAt ? { lastCheckedAt: connection.lastCheckedAt } : {}),
+    ...(connection.managementApiTokenExpiresAt
+      ? { managementApiTokenExpiresAt: connection.managementApiTokenExpiresAt }
+      : {}),
   };
 }
 
@@ -114,6 +126,9 @@ export class ProviderConnectionService {
       provider: input.provider,
       status: "pending",
       credential,
+      ...(input.managementApiTokenExpiresAt
+        ? { managementApiTokenExpiresAt: input.managementApiTokenExpiresAt }
+        : {}),
     });
     return toPublicConnection(connection);
   }
@@ -140,14 +155,20 @@ export class ProviderConnectionService {
     }
 
     const credential = input.credentials
-      ? this.vault.encrypt(input.credentials, {
-          provider: existing.provider,
-          connectionId: existing.credential.connectionId,
-        })
+      ? this.vault.encrypt(
+          { ...this.vault.decrypt(existing.credential), ...input.credentials },
+          {
+            provider: existing.provider,
+            connectionId: existing.credential.connectionId,
+          },
+        )
       : undefined;
     const updated = await this.store.update(connectionId, {
       ...(name ? { name } : {}),
       ...(credential ? { credential, status: "pending" } : {}),
+      ...(input.managementApiTokenExpiresAt !== undefined
+        ? { managementApiTokenExpiresAt: input.managementApiTokenExpiresAt }
+        : {}),
     });
     return toPublicConnection(updated);
   }

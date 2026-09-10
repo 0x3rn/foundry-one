@@ -24,11 +24,13 @@ const connectionRateLimiter = new FixedWindowRateLimiter(10, 60_000);
 interface SupabaseConnectionRequest {
   readonly workspaceId: string;
   readonly projectId?: string;
+  readonly connectionId?: string;
   readonly projectName?: string;
   readonly name: string;
   readonly projectUrl: string;
   readonly serviceRoleKey: string;
   readonly managementApiToken?: string;
+  readonly managementApiTokenExpiresAt?: string;
   readonly databaseUrl?: string;
 }
 
@@ -55,6 +57,7 @@ function parseBody(value: unknown): SupabaseConnectionRequest {
   }
   if (
     (body.projectId !== undefined && typeof body.projectId !== "string") ||
+    (body.connectionId !== undefined && typeof body.connectionId !== "string") ||
     (body.projectName !== undefined && typeof body.projectName !== "string") ||
     (!body.projectId && typeof body.projectName !== "string")
   ) {
@@ -71,20 +74,54 @@ function parseBody(value: unknown): SupabaseConnectionRequest {
     );
   }
 
-  for (const field of ["managementApiToken", "databaseUrl"] as const) {
+  for (const field of [
+    "managementApiToken",
+    "managementApiTokenExpiresAt",
+    "databaseUrl",
+  ] as const) {
     if (body[field] !== undefined && typeof body[field] !== "string") {
       throw new SupabaseCredentialError(`${field} must be a string when provided.`);
+    }
+  }
+
+  const managementApiToken =
+    typeof body.managementApiToken === "string" ? body.managementApiToken.trim() : undefined;
+  const expiryInput =
+    typeof body.managementApiTokenExpiresAt === "string"
+      ? body.managementApiTokenExpiresAt.trim()
+      : undefined;
+  if (managementApiToken && !expiryInput) {
+    throw new SupabaseCredentialError(
+      "Set the management API token expiry so Foundry can warn you before it expires.",
+    );
+  }
+  if (expiryInput && !managementApiToken && !body.connectionId) {
+    throw new SupabaseCredentialError(
+      "The management API token expiry can only be set when a management token is provided.",
+    );
+  }
+  if (expiryInput) {
+    const expiry = new Date(expiryInput);
+    if (Number.isNaN(expiry.getTime())) {
+      throw new SupabaseCredentialError("managementApiTokenExpiresAt must be a valid date.");
+    }
+    if (expiry.getTime() <= Date.now()) {
+      throw new SupabaseCredentialError("The management API token expiry must be in the future.");
     }
   }
 
   return {
     workspaceId: body.workspaceId as string,
     ...(projectId ? { projectId } : {}),
+    ...(typeof body.connectionId === "string" && body.connectionId.trim()
+      ? { connectionId: body.connectionId.trim() }
+      : {}),
     ...(projectName ? { projectName } : {}),
     name: body.name as string,
     projectUrl: body.projectUrl as string,
     serviceRoleKey: body.serviceRoleKey as string,
-    managementApiToken: body.managementApiToken as string | undefined,
+    ...(managementApiToken ? { managementApiToken } : {}),
+    ...(expiryInput ? { managementApiTokenExpiresAt: new Date(expiryInput).toISOString() } : {}),
     databaseUrl: body.databaseUrl as string | undefined,
   };
 }
@@ -182,6 +219,20 @@ export async function POST(request: Request): Promise<Response> {
     const vault = new CredentialVault(createKeyringFromEnvironment());
     const service = new ProviderConnectionService(new PrismaProviderConnectionStore(client), vault);
 
+    if (input.connectionId) {
+      const existing = await client.providerConnection.findFirst({
+        where: { id: input.connectionId, projectId },
+        select: { id: true },
+      });
+      if (!existing) {
+        return errorResponse(
+          "NOT_FOUND",
+          "The provider connection was not found in this project.",
+          404,
+        );
+      }
+    }
+
     const connection = await executeAuthorizedProjectAction(
       {
         principal,
@@ -195,6 +246,27 @@ export async function POST(request: Request): Promise<Response> {
         rateLimiter: connectionRateLimiter,
         rateLimitKey: `${input.workspaceId}:${session.user.id}`,
         execute: async () => {
+          if (input.connectionId) {
+            const updated = await service.update(input.connectionId, {
+              name: input.name,
+              credentials: {
+                projectUrl: input.projectUrl,
+                serviceRoleKey: input.serviceRoleKey,
+                ...(input.managementApiToken
+                  ? { managementApiToken: input.managementApiToken }
+                  : {}),
+                ...(input.databaseUrl ? { databaseUrl: input.databaseUrl } : {}),
+              },
+              ...(input.managementApiTokenExpiresAt
+                ? { managementApiTokenExpiresAt: input.managementApiTokenExpiresAt }
+                : {}),
+            });
+
+            return service.checkConnection(updated.id, async ({ credentials }) =>
+              createSupabaseProvider(credentials),
+            );
+          }
+
           const created = await service.create({
             projectId,
             name: input.name,
@@ -205,6 +277,9 @@ export async function POST(request: Request): Promise<Response> {
               ...(input.managementApiToken ? { managementApiToken: input.managementApiToken } : {}),
               ...(input.databaseUrl ? { databaseUrl: input.databaseUrl } : {}),
             },
+            ...(input.managementApiTokenExpiresAt
+              ? { managementApiTokenExpiresAt: input.managementApiTokenExpiresAt }
+              : {}),
           });
 
           return service.checkConnection(created.id, async ({ credentials }) =>

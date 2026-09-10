@@ -116,10 +116,12 @@ export function DashboardShell({
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [isDark, setIsDark] = useState(false);
+  const [now, setNow] = useState(0);
   const [projectQuery, setProjectQuery] = useState("");
   const [projectPage, setProjectPage] = useState(1);
   const [projectFilter, setProjectFilter] = useState<"all" | "ready">("all");
   const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [renewalConnectionId, setRenewalConnectionId] = useState<string | undefined>();
   const [selectedProjectId, setSelectedProjectId] = useState(projectId);
 
   const summary = useMemo(() => buildControlCenterSummary(controlCenter), [controlCenter]);
@@ -158,6 +160,14 @@ export function DashboardShell({
     ],
     ["Security", capabilities.security],
   ];
+  const selectedConnection = selectedProject?.connections[0];
+  const tokenExpiry = selectedConnection?.managementApiTokenExpiresAt
+    ? new Date(selectedConnection.managementApiTokenExpiresAt)
+    : undefined;
+  const tokenDaysRemaining =
+    tokenExpiry && now > 0 ? Math.ceil((tokenExpiry.getTime() - now) / 86_400_000) : undefined;
+  const tokenNeedsAttention =
+    tokenDaysRemaining !== undefined && (tokenDaysRemaining <= 7 || tokenDaysRemaining < 0);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("foundry-theme");
@@ -166,7 +176,10 @@ export function DashboardShell({
       : window.matchMedia("(prefers-color-scheme: dark)").matches;
     document.documentElement.dataset.theme = nextIsDark ? "dark" : "light";
 
-    const timeoutId = window.setTimeout(() => setIsDark(nextIsDark), 0);
+    const timeoutId = window.setTimeout(() => {
+      setIsDark(nextIsDark);
+      setNow(Date.now());
+    }, 0);
     return () => window.clearTimeout(timeoutId);
   }, []);
 
@@ -713,6 +726,37 @@ export function DashboardShell({
                   <small>open or acknowledged</small>
                 </div>
               </div>
+              {tokenNeedsAttention && tokenExpiry ? (
+                <div className="foundry-token-alert" role="status">
+                  <div>
+                    <span className="foundry-card-eyebrow">
+                      {tokenDaysRemaining !== undefined && tokenDaysRemaining < 0
+                        ? "Management token / expired"
+                        : "Management token / renewal soon"}
+                    </span>
+                    <strong>
+                      {tokenDaysRemaining !== undefined && tokenDaysRemaining < 0
+                        ? "Generate a new Supabase token to restore metadata checks."
+                        : `This token expires ${tokenExpiry.toLocaleDateString()}.`}
+                    </strong>
+                    <p>
+                      Foundry keeps the connection encrypted, but it cannot refresh a Supabase
+                      personal access token for you. Generate a replacement in Supabase, then paste
+                      it into the renewal form.
+                    </p>
+                  </div>
+                  <button
+                    className="foundry-button foundry-button-secondary"
+                    type="button"
+                    onClick={() => {
+                      setRenewalConnectionId(selectedConnection?.id);
+                      setIsWizardOpen(true);
+                    }}
+                  >
+                    Renew token <span className="foundry-button-arrow">↗</span>
+                  </button>
+                </div>
+              ) : null}
               <div className="foundry-capability-strip">
                 {capabilityRows.map(([label, available]) => (
                   <span className={available ? "is-available" : "is-unavailable"} key={label}>
@@ -825,8 +869,12 @@ export function DashboardShell({
       {isWizardOpen ? (
         <SupabaseConnectionWizard
           workspaceId={workspaceId}
-          projectId={projectId}
-          onClose={() => setIsWizardOpen(false)}
+          projectId={renewalConnectionId ? selectedProject?.id : projectId}
+          connectionId={renewalConnectionId}
+          onClose={() => {
+            setIsWizardOpen(false);
+            setRenewalConnectionId(undefined);
+          }}
         />
       ) : null}
     </div>

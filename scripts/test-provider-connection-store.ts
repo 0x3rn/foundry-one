@@ -53,6 +53,7 @@ test("provider connection store persists ciphertext and supports key rotation", 
       name: "Primary",
       provider: "supabase",
       credentials: { accessToken: secret },
+      managementApiTokenExpiresAt: "2026-12-31T23:59:59.000Z",
     });
 
     const rawCredential = await database.credential.findUnique({
@@ -64,6 +65,7 @@ test("provider connection store persists ciphertext and supports key rotation", 
 
     const stored = await store.findById(publicConnection.id);
     assert.ok(stored);
+    assert.equal(stored.managementApiTokenExpiresAt, "2026-12-31T23:59:59.000Z");
     assert.deepEqual(currentVault.decrypt(stored.credential), { accessToken: secret });
 
     const rotatedKeyring = createKeyring(

@@ -170,3 +170,54 @@ test("invalid key configuration fails before encryption begins", () => {
     code: "invalid_key",
   });
 });
+
+test("expired management tokens degrade metadata without blocking the provider", async () => {
+  const store = new MemoryConnectionStore();
+  const vault = new CredentialVault(createKeyring({ version: 1, key: key(4) }));
+  const service = new ProviderConnectionService(store, vault, () => "2026-09-10T00:00:00.000Z");
+  const connection = await service.create({
+    projectId: "project-expiry",
+    name: "Primary",
+    provider: "supabase",
+    credentials: { serviceRoleKey: "service-role" },
+    managementApiTokenExpiresAt: "2026-09-09T23:59:59.000Z",
+  });
+
+  let providerCalled = false;
+  const checked = await service.checkConnection(connection.id, async () => {
+    providerCalled = true;
+    return {
+      name: "supabase",
+      services: {},
+      async connect() {
+        return { state: "degraded", checkedAt: "2026-09-10T00:00:00.000Z" };
+      },
+      async disconnect() {},
+      async testConnection() {
+        return { ok: true };
+      },
+      async getProjectMetadata() {
+        return { id: "project-expiry", name: "Project", provider: "supabase" };
+      },
+      async getCapabilities() {
+        return {
+          projectMetadata: false,
+          relationalDatabase: true,
+          documentDatabase: false,
+          realtimeDatabase: false,
+          sql: true,
+          auth: true,
+          storage: true,
+          functions: false,
+          logs: false,
+          metrics: false,
+          security: false,
+        };
+      },
+    };
+  });
+
+  assert.equal(checked.status, "degraded");
+  assert.equal(providerCalled, true);
+  assert.equal(store.records.get(connection.id)?.status, "degraded");
+});

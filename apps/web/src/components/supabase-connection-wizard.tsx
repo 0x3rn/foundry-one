@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 interface SupabaseConnectionWizardProps {
   readonly workspaceId?: string;
   readonly projectId?: string;
+  readonly connectionId?: string;
   readonly onClose: () => void;
 }
 
 export function SupabaseConnectionWizard({
   workspaceId,
   projectId,
+  connectionId,
   onClose,
 }: SupabaseConnectionWizardProps) {
   const router = useRouter();
@@ -20,6 +22,7 @@ export function SupabaseConnectionWizard({
   const [projectUrl, setProjectUrl] = useState("");
   const [serviceRoleKey, setServiceRoleKey] = useState("");
   const [managementApiToken, setManagementApiToken] = useState("");
+  const [managementApiTokenExpiresAt, setManagementApiTokenExpiresAt] = useState("");
   const [databaseUrl, setDatabaseUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -27,6 +30,12 @@ export function SupabaseConnectionWizard({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    if (managementApiToken && !managementApiTokenExpiresAt) {
+      setError(
+        "Add the management API token expiry date so Foundry can remind you before it expires.",
+      );
+      return;
+    }
     setIsSubmitting(true);
 
     try {
@@ -35,11 +44,19 @@ export function SupabaseConnectionWizard({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workspaceId,
+          ...(connectionId ? { connectionId } : {}),
           ...(projectId ? { projectId } : { projectName }),
           name: connectionName,
           projectUrl,
           serviceRoleKey,
           ...(managementApiToken ? { managementApiToken } : {}),
+          ...(managementApiTokenExpiresAt
+            ? {
+                managementApiTokenExpiresAt: new Date(
+                  `${managementApiTokenExpiresAt}T23:59:59.999`,
+                ).toISOString(),
+              }
+            : {}),
           ...(databaseUrl ? { databaseUrl } : {}),
         }),
       });
@@ -51,6 +68,7 @@ export function SupabaseConnectionWizard({
 
       setServiceRoleKey("");
       setManagementApiToken("");
+      setManagementApiTokenExpiresAt("");
       setDatabaseUrl("");
       router.refresh();
       onClose();
@@ -72,11 +90,18 @@ export function SupabaseConnectionWizard({
       >
         <div className="foundry-wizard-header">
           <div>
-            <p className="foundry-card-eyebrow">01 / connect a backend</p>
-            <h2 id="supabase-wizard-title">Bring Supabase into the room.</h2>
+            <p className="foundry-card-eyebrow">
+              01 / {connectionId ? "renew a connection" : "connect a backend"}
+            </p>
+            <h2 id="supabase-wizard-title">
+              {connectionId
+                ? "Keep the Supabase connection alive."
+                : "Bring Supabase into the room."}
+            </h2>
             <p>
-              Foundry checks the project server-side, keeps the keys encrypted, and only brings back
-              the connection state.
+              {connectionId
+                ? "Paste the replacement credentials from Supabase. Foundry checks them server-side and keeps the keys encrypted."
+                : "Foundry checks the project server-side, keeps the keys encrypted, and only brings back the connection state."}
             </p>
           </div>
           <button
@@ -140,10 +165,14 @@ export function SupabaseConnectionWizard({
               <input
                 type="password"
                 value={managementApiToken}
-                onChange={(event) => setManagementApiToken(event.target.value)}
+                onChange={(event) => {
+                  setManagementApiToken(event.target.value);
+                  if (!event.target.value) setManagementApiTokenExpiresAt("");
+                }}
                 placeholder="For project metadata"
                 autoComplete="new-password"
               />
+              <small>Optional. Foundry uses it for project metadata, not database access.</small>
             </label>
             <label>
               Database URL <span>optional</span>
@@ -156,6 +185,29 @@ export function SupabaseConnectionWizard({
               />
             </label>
           </div>
+          {managementApiToken ? (
+            <div className="foundry-token-expiry">
+              <label>
+                Management token expires <span>required with a token</span>
+                <input
+                  type="date"
+                  value={managementApiTokenExpiresAt}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(event) => setManagementApiTokenExpiresAt(event.target.value)}
+                  required
+                />
+              </label>
+              <p>
+                We will show an in-app reminder 7 days before this date and ask you to replace the
+                token if it expires.
+              </p>
+            </div>
+          ) : null}
+          {!workspaceId ? (
+            <p className="foundry-form-error" role="alert">
+              Your workspace is still being prepared. Refresh this page before connecting a backend.
+            </p>
+          ) : null}
           {error ? (
             <p className="foundry-form-error" role="alert">
               {error}

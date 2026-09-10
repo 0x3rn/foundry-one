@@ -17,6 +17,7 @@ type ProviderConnectionWithCredential = Awaited<
     iv: string;
     authTag: string;
     ciphertext: string;
+    managementApiTokenExpiresAt: Date | null;
   } | null;
   capabilities: unknown;
 };
@@ -36,6 +37,9 @@ function toStoredConnection(record: ProviderConnectionWithCredential): StoredPro
       ? { capabilities: record.capabilities as unknown as ProviderCapabilities }
       : {}),
     ...(record.lastCheckedAt ? { lastCheckedAt: record.lastCheckedAt.toISOString() } : {}),
+    ...(record.credential.managementApiTokenExpiresAt
+      ? { managementApiTokenExpiresAt: record.credential.managementApiTokenExpiresAt.toISOString() }
+      : {}),
     credential: {
       algorithm: record.credential.algorithm as EncryptedEnvelope["algorithm"],
       keyVersion: record.credential.keyVersion,
@@ -46,6 +50,27 @@ function toStoredConnection(record: ProviderConnectionWithCredential): StoredPro
       connectionId: record.credential.connectionId,
     },
   };
+}
+
+async function managementTokenExpiry(
+  database: PrismaClient,
+  connectionId: string,
+): Promise<string | undefined> {
+  const rows = await database.$queryRaw<Array<{ expiresAt: Date | null }>>(
+    Prisma.sql`
+      SELECT "managementApiTokenExpiresAt" AS "expiresAt"
+      FROM "Credential"
+      WHERE "providerConnectionId" = ${connectionId}
+    `,
+  );
+  return rows[0]?.expiresAt?.toISOString();
+}
+
+function withManagementTokenExpiry(
+  connection: StoredProviderConnection,
+  expiresAt: string | undefined,
+): StoredProviderConnection {
+  return expiresAt ? { ...connection, managementApiTokenExpiresAt: expiresAt } : connection;
 }
 
 export class PrismaProviderConnectionStore implements ProviderConnectionStore {
@@ -76,7 +101,15 @@ export class PrismaProviderConnectionStore implements ProviderConnectionStore {
       },
       include: { credential: true },
     });
-    return toStoredConnection(record as ProviderConnectionWithCredential);
+    if (input.managementApiTokenExpiresAt) {
+      await this.database.$executeRaw(
+        Prisma.sql`UPDATE "Credential" SET "managementApiTokenExpiresAt" = ${new Date(input.managementApiTokenExpiresAt)} WHERE "providerConnectionId" = ${record.id}`,
+      );
+    }
+    return withManagementTokenExpiry(
+      toStoredConnection(record as ProviderConnectionWithCredential),
+      await managementTokenExpiry(this.database, record.id),
+    );
   }
 
   async findById(id: string): Promise<StoredProviderConnection | null> {
@@ -84,7 +117,12 @@ export class PrismaProviderConnectionStore implements ProviderConnectionStore {
       where: { id },
       include: { credential: true },
     });
-    return record ? toStoredConnection(record as ProviderConnectionWithCredential) : null;
+    return record
+      ? withManagementTokenExpiry(
+          toStoredConnection(record as ProviderConnectionWithCredential),
+          await managementTokenExpiry(this.database, record.id),
+        )
+      : null;
   }
 
   async findByProjectAndName(
@@ -95,7 +133,12 @@ export class PrismaProviderConnectionStore implements ProviderConnectionStore {
       where: { projectId_name: { projectId, name } },
       include: { credential: true },
     });
-    return record ? toStoredConnection(record as ProviderConnectionWithCredential) : null;
+    return record
+      ? withManagementTokenExpiry(
+          toStoredConnection(record as ProviderConnectionWithCredential),
+          await managementTokenExpiry(this.database, record.id),
+        )
+      : null;
   }
 
   async update(
@@ -103,7 +146,12 @@ export class PrismaProviderConnectionStore implements ProviderConnectionStore {
     input: Partial<
       Pick<
         StoredProviderConnection,
-        "name" | "status" | "capabilities" | "lastCheckedAt" | "credential"
+        | "name"
+        | "status"
+        | "capabilities"
+        | "lastCheckedAt"
+        | "managementApiTokenExpiresAt"
+        | "credential"
       >
     >,
   ): Promise<StoredProviderConnection> {
@@ -140,7 +188,15 @@ export class PrismaProviderConnectionStore implements ProviderConnectionStore {
       },
       include: { credential: true },
     });
-    return toStoredConnection(record as ProviderConnectionWithCredential);
+    if (input.managementApiTokenExpiresAt !== undefined) {
+      await this.database.$executeRaw(
+        Prisma.sql`UPDATE "Credential" SET "managementApiTokenExpiresAt" = ${input.managementApiTokenExpiresAt ? new Date(input.managementApiTokenExpiresAt) : null} WHERE "providerConnectionId" = ${record.id}`,
+      );
+    }
+    return withManagementTokenExpiry(
+      toStoredConnection(record as ProviderConnectionWithCredential),
+      await managementTokenExpiry(this.database, record.id),
+    );
   }
 
   async delete(id: string): Promise<void> {

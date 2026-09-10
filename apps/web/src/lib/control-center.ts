@@ -8,6 +8,7 @@ export interface ControlCenterConnection {
   readonly status: ProviderConnectionState;
   readonly capabilities?: ProviderCapabilities;
   readonly lastCheckedAt?: string;
+  readonly managementApiTokenExpiresAt?: string;
 }
 
 export interface ControlCenterMetric {

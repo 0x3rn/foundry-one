@@ -263,6 +263,7 @@ model Credential {
   iv                   String
   authTag              String
   ciphertext           String
+  managementApiTokenExpiresAt DateTime?
   rotatedAt            DateTime?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt

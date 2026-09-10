@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getAuth } from "@foundry/auth";
-import { getDatabaseClient } from "@foundry/database";
+import { createPrismaWorkspaceRepository, createWorkspace, getAuth } from "@foundry/auth";
+import { Prisma, getDatabaseClient } from "@foundry/database";
 import { DashboardShell } from "@/components/dashboard-shell";
 import type { ControlCenterData } from "@/lib/control-center";
 
@@ -14,7 +14,8 @@ export default async function Home() {
     redirect("/login");
   }
 
-  const workspace = await getDatabaseClient().workspace.findFirst({
+  const database = getDatabaseClient();
+  let workspace = await database.workspace.findFirst({
     where: { members: { some: { userId: session.user.id } } },
     orderBy: { createdAt: "asc" },
     select: {
@@ -65,6 +66,87 @@ export default async function Home() {
     },
   });
 
+  if (!workspace) {
+    const slug = `personal-${session.user.id.slice(0, 12).toLowerCase()}`;
+    try {
+      await createWorkspace(createPrismaWorkspaceRepository(database), session.user.id, {
+        organizationName: `${session.user.name}'s organization`,
+        organizationSlug: `${slug}-organization`,
+        workspaceName: `${session.user.name}'s workspace`,
+        workspaceSlug: slug,
+      });
+    } catch {
+      // A second tab may have provisioned the workspace first. Re-read below;
+      // a genuine database failure still surfaces when no workspace exists.
+    }
+    workspace = await database.workspace.findFirst({
+      where: { members: { some: { userId: session.user.id } } },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        name: true,
+        projects: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            name: true,
+            environment: true,
+            createdAt: true,
+            providerConnections: {
+              orderBy: { createdAt: "asc" },
+              select: {
+                id: true,
+                name: true,
+                provider: true,
+                status: true,
+                capabilities: true,
+                lastCheckedAt: true,
+              },
+            },
+            metricSnapshots: {
+              orderBy: { capturedAt: "desc" },
+              take: 50,
+              select: { metricName: true, value: true, unit: true, capturedAt: true },
+            },
+            securityFindings: {
+              orderBy: { lastSeenAt: "desc" },
+              take: 20,
+              select: { id: true, title: true, severity: true, state: true, lastSeenAt: true },
+            },
+          },
+        },
+        auditLogs: {
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: {
+            id: true,
+            projectId: true,
+            action: true,
+            resourceType: true,
+            result: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+  }
+
+  const tokenExpirations = await database.$queryRaw<
+    Array<{ providerConnectionId: string; managementApiTokenExpiresAt: Date | null }>
+  >(Prisma.sql`
+    SELECT "providerConnectionId", "managementApiTokenExpiresAt"
+    FROM "Credential"
+    WHERE "providerConnectionId" IN (
+      SELECT pc.id
+      FROM "ProviderConnection" pc
+      JOIN "Project" p ON p.id = pc."projectId"
+      WHERE p."workspaceId" = ${workspace?.id ?? ""}
+    )
+  `);
+  const tokenExpiryByConnection = new Map(
+    tokenExpirations.map((item) => [item.providerConnectionId, item.managementApiTokenExpiresAt]),
+  );
+
   const controlCenter: ControlCenterData = {
     workspace: { id: workspace?.id ?? "", name: workspace?.name ?? "Personal workspace" },
     projects: (workspace?.projects ?? []).map((project) => ({
@@ -85,6 +167,13 @@ export default async function Home() {
           : {}),
         ...(connection.lastCheckedAt
           ? { lastCheckedAt: connection.lastCheckedAt.toISOString() }
+          : {}),
+        ...(tokenExpiryByConnection.get(connection.id)
+          ? {
+              managementApiTokenExpiresAt: tokenExpiryByConnection
+                .get(connection.id)
+                ?.toISOString(),
+            }
           : {}),
       })),
       metrics: project.metricSnapshots.map((metric) => ({
