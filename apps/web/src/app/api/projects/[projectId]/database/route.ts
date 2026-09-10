@@ -119,10 +119,21 @@ function parseColumnDefinition(value: unknown): DatabaseColumnDefinition {
 
 function parseMutationBody(value: unknown): {
   readonly operation:
-    "insert" | "update" | "delete" | "prepare-delete" | "create-table" | "add-column";
+    | "insert"
+    | "update"
+    | "delete"
+    | "prepare-delete"
+    | "bulk-delete"
+    | "prepare-bulk-delete"
+    | "create-table"
+    | "add-column";
   readonly table: string;
   readonly values?: ProviderRecord;
   readonly identity?: { readonly column: string; readonly value: ProviderScalar };
+  readonly identities?: readonly {
+    readonly column: string;
+    readonly value: ProviderScalar;
+  }[];
   readonly confirmationToken?: string;
   readonly schema?: string;
   readonly columns?: readonly DatabaseColumnDefinition[];
@@ -139,13 +150,15 @@ function parseMutationBody(value: unknown): {
         "update",
         "delete",
         "prepare-delete",
+        "bulk-delete",
+        "prepare-bulk-delete",
         "create-table",
         "add-column",
       ] as readonly unknown[]
     ).includes(body.operation)
   ) {
     throw new SupabaseCredentialError(
-      "operation must be insert, update, delete, prepare-delete, create-table, or add-column.",
+      "operation must be insert, update, delete, prepare-delete, bulk-delete, prepare-bulk-delete, create-table, or add-column.",
     );
   }
   if (typeof body.table !== "string" || !body.table.trim()) {
@@ -196,6 +209,27 @@ function parseMutationBody(value: unknown): {
     throw new SupabaseCredentialError("identity must include a column and supported value.");
   }
   const normalizedIdentity = identity as Record<string, unknown> | undefined;
+  const identities = body.identities;
+  if (
+    identities !== undefined &&
+    (!Array.isArray(identities) ||
+      identities.length === 0 ||
+      identities.length > 50 ||
+      identities.some(
+        (item) =>
+          !item ||
+          typeof item !== "object" ||
+          Array.isArray(item) ||
+          typeof (item as Record<string, unknown>).column !== "string" ||
+          !("value" in (item as Record<string, unknown>)) ||
+          !isProviderScalar((item as Record<string, unknown>).value),
+      ))
+  ) {
+    throw new SupabaseCredentialError(
+      "identities must contain between 1 and 50 row identities with supported values.",
+    );
+  }
+  const normalizedIdentities = identities as readonly Record<string, unknown>[] | undefined;
   const confirmationToken = body.confirmationToken;
   if (
     confirmationToken !== undefined &&
@@ -205,7 +239,14 @@ function parseMutationBody(value: unknown): {
   }
   return {
     operation: body.operation as
-      "insert" | "update" | "delete" | "prepare-delete" | "create-table" | "add-column",
+      | "insert"
+      | "update"
+      | "delete"
+      | "prepare-delete"
+      | "bulk-delete"
+      | "prepare-bulk-delete"
+      | "create-table"
+      | "add-column",
     table: body.table.trim(),
     ...(normalizedValues ? { values: normalizedValues } : {}),
     ...(normalizedIdentity
@@ -214,6 +255,14 @@ function parseMutationBody(value: unknown): {
             column: normalizedIdentity.column as string,
             value: normalizedIdentity.value as ProviderScalar,
           },
+        }
+      : {}),
+    ...(normalizedIdentities
+      ? {
+          identities: normalizedIdentities.map((item) => ({
+            column: item.column as string,
+            value: item.value as ProviderScalar,
+          })),
         }
       : {}),
     ...(confirmationToken ? { confirmationToken } : {}),
@@ -412,6 +461,23 @@ export async function POST(
         409,
       );
     }
+    if (
+      (input.operation === "bulk-delete" || input.operation === "prepare-bulk-delete") &&
+      !input.identities
+    ) {
+      return errorResponse(
+        "IDENTITIES_REQUIRED",
+        "Bulk database actions require selected row identities.",
+        400,
+      );
+    }
+    if (input.operation === "bulk-delete" && !input.confirmationToken) {
+      return errorResponse(
+        "CONFIRMATION_REQUIRED",
+        "A fresh bulk deletion confirmation is required.",
+        409,
+      );
+    }
     if (input.operation === "create-table" && (!input.schema || !input.columns)) {
       return errorResponse(
         "SCHEMA_REQUIRED",
@@ -477,7 +543,7 @@ export async function POST(
     const vault = new CredentialVault(createKeyringFromEnvironment());
     const confirmationStore = new PrismaConfirmationChallengeStore(client);
     const action =
-      input.operation === "delete"
+      input.operation === "delete" || input.operation === "bulk-delete"
         ? "row.delete"
         : input.operation === "create-table" || input.operation === "add-column"
           ? `database.schema.${input.operation}`
@@ -490,7 +556,7 @@ export async function POST(
         projectId: project.id,
         permission: "database.write",
         action,
-        ...(input.operation === "delete"
+        ...(input.operation === "delete" || input.operation === "bulk-delete"
           ? {
               expectedConfirmation: {
                 action: "row.delete" as const,
@@ -527,13 +593,33 @@ export async function POST(
               },
             );
           }
-          if (input.operation === "prepare-delete") {
+          if (input.operation === "prepare-delete" || input.operation === "prepare-bulk-delete") {
             return confirmationStore.create({
               workspaceId: project.workspaceId,
               projectId: project.id,
               actorUserId: session.user.id,
               action: "row.delete",
             });
+          }
+          if (input.operation === "bulk-delete") {
+            if (!service.deleteRows) {
+              throw new ProviderError(
+                "capability_unsupported",
+                "This connection does not support bulk row deletion.",
+                { provider: "supabase", operation: "database.row.bulk-delete" },
+              );
+            }
+            await confirmationStore.claim({
+              workspaceId: project.workspaceId,
+              projectId: project.id,
+              actorUserId: session.user.id,
+              action: "row.delete",
+              token: input.confirmationToken as string,
+            });
+            return service.deleteRows(
+              input.table,
+              input.identities as NonNullable<typeof input.identities>,
+            );
           }
           if (input.operation === "create-table") {
             if (!service.createTable) {

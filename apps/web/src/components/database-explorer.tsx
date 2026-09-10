@@ -115,6 +115,8 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [newRowValues, setNewRowValues] = useState<RowEditorInput>({});
+  const [selectedRowIds, setSelectedRowIds] = useState<ReadonlySet<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [error, setError] = useState<string>();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -164,6 +166,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         setDetails(nextDetails);
         setRows(page.items);
         setNextCursor(page.nextCursor);
+        setSelectedRowIds(new Set());
       })
       .catch((caught: unknown) => {
         if (active)
@@ -209,6 +212,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       );
       setRows(page.items);
       setNextCursor(page.nextCursor);
+      setSelectedRowIds(new Set());
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The next page could not be loaded.");
     } finally {
@@ -297,6 +301,85 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setError(caught instanceof Error ? caught.message : "The row could not be duplicated.");
     } finally {
       setIsDuplicating(false);
+    }
+  }
+
+  function toggleRowSelection(row: DatabaseRow) {
+    if (!row.identity) return;
+    setSelectedRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(row.id)) next.delete(row.id);
+      else next.add(row.id);
+      return next;
+    });
+  }
+
+  function toggleAllVisibleRows() {
+    const selectableRows = rows.filter((row) => row.identity);
+    setSelectedRowIds((current) => {
+      const next = new Set(current);
+      const allSelected = selectableRows.every((row) => next.has(row.id));
+      for (const row of selectableRows) {
+        if (allSelected) next.delete(row.id);
+        else next.add(row.id);
+      }
+      return next;
+    });
+  }
+
+  async function deleteSelectedRows() {
+    if (!selectedTable || selectedRowIds.size === 0) return;
+    const selectedRows = rows.filter((row) => selectedRowIds.has(row.id));
+    const identities = selectedRows.flatMap((row) => (row.identity ? [row.identity] : []));
+    if (identities.length !== selectedRows.length) {
+      setError("Every selected row must have a stable single-column identity.");
+      return;
+    }
+    setIsBulkDeleting(true);
+    setError(undefined);
+    try {
+      const prepareResponse = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "prepare-bulk-delete",
+          table: selectedTable,
+          identities,
+        }),
+      });
+      const prepared = (await prepareResponse.json()) as ApiResponse<{ token: string }>;
+      if (!prepareResponse.ok || !prepared.data) {
+        throw new Error(
+          prepared.error?.message ?? "A bulk deletion confirmation could not be prepared.",
+        );
+      }
+      const confirmed = window.confirm(
+        `Delete ${identities.length} selected rows from ${selectedTable}? This cannot be undone.`,
+      );
+      if (!confirmed) return;
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "bulk-delete",
+          table: selectedTable,
+          identities,
+          confirmationToken: prepared.data.token,
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<readonly DatabaseRow[]>;
+      if (!response.ok || !body.data) {
+        throw new Error(body.error?.message ?? "The selected rows could not be deleted.");
+      }
+      setSelectedRowIds(new Set());
+      setIsTableLoading(true);
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "The selected rows could not be deleted.",
+      );
+    } finally {
+      setIsBulkDeleting(false);
     }
   }
 
@@ -482,6 +565,10 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
     }
   }
 
+  const selectableRows = rows.filter((row) => row.identity);
+  const allVisibleRowsSelected =
+    selectableRows.length > 0 && selectableRows.every((row) => selectedRowIds.has(row.id));
+
   return (
     <div className="foundry-database-explorer">
       <div className="foundry-database-header">
@@ -623,6 +710,21 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
           )}
         </div>
       ) : null}
+      {selectedRowIds.size > 0 ? (
+        <div className="foundry-database-bulk-actions" aria-live="polite">
+          <strong>{selectedRowIds.size} rows selected</strong>
+          <button type="button" disabled={isBulkDeleting} onClick={deleteSelectedRows}>
+            {isBulkDeleting ? "Deleting…" : "Delete selected"}
+          </button>
+          <button
+            type="button"
+            disabled={isBulkDeleting}
+            onClick={() => setSelectedRowIds(new Set())}
+          >
+            Clear selection
+          </button>
+        </div>
+      ) : null}
       {error ? <p className="foundry-database-error">{error}</p> : null}
       {isLoading ? (
         <p className="foundry-database-empty">Reading schemas and tables…</p>
@@ -667,6 +769,15 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
               <table>
                 <thead>
                   <tr>
+                    <th>
+                      <input
+                        type="checkbox"
+                        checked={allVisibleRowsSelected}
+                        disabled={selectableRows.length === 0 || isBulkDeleting}
+                        onChange={toggleAllVisibleRows}
+                        aria-label="Select all rows with a stable identity"
+                      />
+                    </th>
                     {columns.map((column) => (
                       <th key={column.id}>
                         <button type="button" onClick={() => toggleSort(column.name)}>
@@ -686,6 +797,19 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                 <tbody>
                   {rows.map((row) => (
                     <tr key={row.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={row.identity ? selectedRowIds.has(row.id) : false}
+                          disabled={!row.identity || isBulkDeleting}
+                          onChange={() => toggleRowSelection(row)}
+                          aria-label={
+                            row.identity
+                              ? `Select row ${String(row.identity.value)}`
+                              : "Row cannot be selected without a stable identity"
+                          }
+                        />
+                      </td>
                       {columns.map((column) => {
                         const isEditing = editingRowId === row.id;
                         return (

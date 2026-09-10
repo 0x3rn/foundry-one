@@ -764,6 +764,61 @@ function createDatabaseProvider(
       }
       return normalizeRow(rows[0], 0);
     },
+    async deleteRows(table, identities): Promise<readonly NormalizedRow[]> {
+      const reference = splitTableReference(table);
+      if (identities.length === 0 || identities.length > 50) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk deletion requires between 1 and 50 row identities.",
+          { provider: "supabase", operation: "bulk delete database rows" },
+        );
+      }
+      const identityColumn = identities[0]?.column.trim();
+      if (!identityColumn) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk deletion requires a stable row identity.",
+          { provider: "supabase", operation: "bulk delete database rows" },
+        );
+      }
+      quoteIdentifier(identityColumn);
+      if (
+        identities.some(
+          (identity) => identity.column.trim() !== identityColumn || identity.value === null,
+        )
+      ) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk deletion identities must use one non-null column.",
+          { provider: "supabase", operation: "bulk delete database rows" },
+        );
+      }
+      const primaryKeyRows = await client.query<{ column_name: string }>(
+        `SELECT k.column_name
+         FROM information_schema.key_column_usage k
+         JOIN information_schema.table_constraints tc
+           ON tc.constraint_name = k.constraint_name
+          AND tc.table_schema = k.table_schema
+          AND tc.table_name = k.table_name
+         WHERE k.table_schema = $1 AND k.table_name = $2
+           AND tc.constraint_type = 'PRIMARY KEY'
+         ORDER BY k.ordinal_position`,
+        [reference.schema, reference.table],
+      );
+      if (primaryKeyRows.length !== 1 || primaryKeyRows[0]?.column_name !== identityColumn) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk deletion requires a single-column primary key.",
+          { provider: "supabase", operation: "bulk delete database rows" },
+        );
+      }
+      const placeholders = identities.map((_, index) => `$${index + 1}`).join(", ");
+      const rows = await client.query<Record<string, unknown>>(
+        `DELETE FROM ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} WHERE ${quoteIdentifier(identityColumn)} IN (${placeholders}) RETURNING *`,
+        identities.map((identity) => identity.value),
+      );
+      return rows.map((row, index) => normalizeRow(row, index, identityColumn));
+    },
   };
 }
 
