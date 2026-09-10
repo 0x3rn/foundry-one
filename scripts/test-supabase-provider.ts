@@ -280,7 +280,7 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
       isPrimaryKey: true,
       defaultValue: "gen_random_uuid()",
     },
-    { name: "total", dataType: "numeric", nullable: false },
+    { name: "total", dataType: "numeric", nullable: false, isUnique: true },
   ]);
   await provider.services.database?.addColumn?.("public.orders", {
     name: "notes",
@@ -288,11 +288,19 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     nullable: true,
   });
   assert.ok(executedQueries.some((query) => query.includes('CREATE TABLE "public"."invoices"')));
+  assert.ok(executedQueries.some((query) => query.includes('"total" numeric UNIQUE NOT NULL')));
   assert.ok(executedQueries.some((query) => query.includes('ALTER TABLE "public"."orders"')));
   await assert.rejects(
     () =>
       provider.services.database?.createTable?.("public", "unsafe", [
         { name: "value", dataType: "money; DROP TABLE users", nullable: true },
+      ]),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
+  await assert.rejects(
+    () =>
+      provider.services.database?.createTable?.("public", "invalid_unique", [
+        { name: "id", dataType: "uuid", nullable: false, isPrimaryKey: true, isUnique: true },
       ]),
     (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
   );

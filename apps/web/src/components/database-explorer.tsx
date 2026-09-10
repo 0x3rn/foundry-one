@@ -116,10 +116,12 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [newTableType, setNewTableType] = useState("text");
   const [newTableNullable, setNewTableNullable] = useState(false);
   const [newTablePrimaryKey, setNewTablePrimaryKey] = useState(false);
+  const [newTableUnique, setNewTableUnique] = useState(false);
   const [newTableDefault, setNewTableDefault] = useState("");
   const [newColumnName, setNewColumnName] = useState("");
   const [newColumnType, setNewColumnType] = useState("text");
   const [newColumnNullable, setNewColumnNullable] = useState(true);
+  const [newColumnUnique, setNewColumnUnique] = useState(false);
   const [newColumnDefault, setNewColumnDefault] = useState("");
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editValues, setEditValues] = useState<Record<string, string>>({});
@@ -592,6 +594,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
               dataType: newTableType,
               nullable: newTablePrimaryKey ? false : newTableNullable,
               ...(newTablePrimaryKey ? { isPrimaryKey: true } : {}),
+              ...(newTableUnique && !newTablePrimaryKey ? { isUnique: true } : {}),
               ...(newTableDefault.trim() ? { defaultValue: newTableDefault.trim() } : {}),
             },
           ],
@@ -605,6 +608,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setNewTableDefault("");
       setNewTableNullable(false);
       setNewTablePrimaryKey(false);
+      setNewTableUnique(false);
       setSelectedTable(body.data.id);
       setReloadToken((current) => current + 1);
     } catch (caught) {
@@ -634,6 +638,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
             name: column,
             dataType: newColumnType,
             nullable: newColumnNullable,
+            ...(newColumnUnique ? { isUnique: true } : {}),
             ...(newColumnDefault.trim() ? { defaultValue: newColumnDefault.trim() } : {}),
           },
         }),
@@ -644,6 +649,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setNewColumnName("");
       setNewColumnDefault("");
       setNewColumnNullable(true);
+      setNewColumnUnique(false);
       setReloadToken((current) => current + 1);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The column could not be added.");
@@ -704,9 +710,21 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
             <input
               type="checkbox"
               checked={newTablePrimaryKey}
-              onChange={(event) => setNewTablePrimaryKey(event.target.checked)}
+              onChange={(event) => {
+                setNewTablePrimaryKey(event.target.checked);
+                if (event.target.checked) setNewTableUnique(false);
+              }}
             />
             primary key
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={newTableUnique}
+              disabled={newTablePrimaryKey}
+              onChange={(event) => setNewTableUnique(event.target.checked)}
+            />
+            unique
           </label>
           <input
             value={newTableDefault}
@@ -743,6 +761,14 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
                 onChange={(event) => setNewColumnNullable(event.target.checked)}
               />
               nullable
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={newColumnUnique}
+                onChange={(event) => setNewColumnUnique(event.target.checked)}
+              />
+              unique
             </label>
             <input
               value={newColumnDefault}

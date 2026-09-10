@@ -281,6 +281,7 @@ function validateColumnDefinition(column: DatabaseColumnDefinition): {
   readonly dataType: string;
   readonly nullable: boolean;
   readonly isPrimaryKey: boolean;
+  readonly isUnique: boolean;
   readonly defaultValue?: string;
 } {
   if (!column.name.trim()) {
@@ -296,11 +297,19 @@ function validateColumnDefinition(column: DatabaseColumnDefinition): {
       operation: "validate PostgreSQL column",
     });
   }
+  if (column.isPrimaryKey && column.isUnique) {
+    throw new ProviderError(
+      "invalid_configuration",
+      "A primary key is already unique; choose one constraint type.",
+      { provider: "supabase", operation: "validate PostgreSQL column" },
+    );
+  }
   return {
     name: column.name,
     dataType: validateDataType(column.dataType),
     nullable: column.nullable,
     isPrimaryKey: column.isPrimaryKey ?? false,
+    isUnique: column.isUnique ?? false,
     ...(validateDefaultValue(column.defaultValue)
       ? { defaultValue: validateDefaultValue(column.defaultValue) }
       : {}),
@@ -401,7 +410,7 @@ function createDatabaseProvider(
       const definition = normalizedColumns
         .map(
           (column) =>
-            `${quoteIdentifier(column.name)} ${column.dataType}${column.defaultValue ? ` DEFAULT ${column.defaultValue}` : ""}${column.isPrimaryKey ? " PRIMARY KEY" : ""}${column.nullable ? "" : " NOT NULL"}`,
+            `${quoteIdentifier(column.name)} ${column.dataType}${column.defaultValue ? ` DEFAULT ${column.defaultValue}` : ""}${column.isPrimaryKey ? " PRIMARY KEY" : ""}${column.isUnique ? " UNIQUE" : ""}${column.nullable ? "" : " NOT NULL"}`,
         )
         .join(", ");
       await client.query(`CREATE TABLE ${quotedSchema}.${quotedTable} (${definition})`);
@@ -418,7 +427,7 @@ function createDatabaseProvider(
         );
       }
       await client.query(
-        `ALTER TABLE ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} ADD COLUMN ${quoteIdentifier(normalizedColumn.name)} ${normalizedColumn.dataType}${normalizedColumn.defaultValue ? ` DEFAULT ${normalizedColumn.defaultValue}` : ""}${normalizedColumn.nullable ? "" : " NOT NULL"}`,
+        `ALTER TABLE ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} ADD COLUMN ${quoteIdentifier(normalizedColumn.name)} ${normalizedColumn.dataType}${normalizedColumn.defaultValue ? ` DEFAULT ${normalizedColumn.defaultValue}` : ""}${normalizedColumn.isUnique ? " UNIQUE" : ""}${normalizedColumn.nullable ? "" : " NOT NULL"}`,
       );
       return {
         id: `${table}.${normalizedColumn.name}`,

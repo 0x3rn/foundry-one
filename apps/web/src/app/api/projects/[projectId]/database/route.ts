@@ -102,10 +102,11 @@ function parseColumnDefinition(value: unknown): DatabaseColumnDefinition {
     typeof column.dataType !== "string" ||
     typeof column.nullable !== "boolean" ||
     (column.isPrimaryKey !== undefined && typeof column.isPrimaryKey !== "boolean") ||
+    (column.isUnique !== undefined && typeof column.isUnique !== "boolean") ||
     (column.defaultValue !== undefined && typeof column.defaultValue !== "string")
   ) {
     throw new SupabaseCredentialError(
-      "A column needs a name, dataType, nullable flag, and optional primary-key/default values.",
+      "A column needs a name, dataType, nullable flag, and optional primary-key/unique/default values.",
     );
   }
   return {
@@ -113,6 +114,7 @@ function parseColumnDefinition(value: unknown): DatabaseColumnDefinition {
     dataType: column.dataType,
     nullable: column.nullable,
     ...(column.isPrimaryKey !== undefined ? { isPrimaryKey: column.isPrimaryKey } : {}),
+    ...(column.isUnique !== undefined ? { isUnique: column.isUnique } : {}),
     ...(column.defaultValue !== undefined ? { defaultValue: column.defaultValue } : {}),
   };
 }

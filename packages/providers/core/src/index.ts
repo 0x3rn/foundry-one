@@ -74,6 +74,7 @@ export interface DatabaseColumnDefinition {
   readonly dataType: string;
   readonly nullable: boolean;
   readonly isPrimaryKey?: boolean;
+  readonly isUnique?: boolean;
   readonly defaultValue?: string;
 }
 
