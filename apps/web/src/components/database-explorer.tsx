@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
-  asProviderRecord,
   encodeCsv,
+  mapTransferRecordToColumns,
   parseTransferFile,
   type TransferRecord,
 } from "@/lib/database-transfer";
@@ -541,7 +541,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
           body: JSON.stringify({
             operation: "insert",
             table: selectedTable,
-            values: asProviderRecord(row),
+            values: mapTransferRecordToColumns(columns, row),
           }),
         });
         const body = (await response.json()) as ApiResponse<DatabaseRow>;

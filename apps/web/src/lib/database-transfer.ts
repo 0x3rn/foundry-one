@@ -3,6 +3,14 @@ import type { ProviderRecord, ProviderScalar } from "@foundry/providers-core";
 export type TransferValue = ProviderScalar | string[];
 export type TransferRecord = Readonly<Record<string, TransferValue>>;
 
+export interface TransferColumn {
+  readonly name: string;
+  readonly dataType: string;
+  readonly nullable: boolean;
+  readonly isIdentity: boolean;
+  readonly defaultValue?: string;
+}
+
 export function encodeCsv(headers: readonly string[], rows: readonly TransferRecord[]): string {
   const lines = [headers.map(csvCell).join(",")];
   for (const row of rows) {
@@ -124,4 +132,54 @@ function csvCell(value: ProviderScalar | string[] | undefined): string {
 
 export function asProviderRecord(value: TransferRecord): ProviderRecord {
   return value;
+}
+
+export function mapTransferRecordToColumns(
+  columns: readonly TransferColumn[],
+  record: TransferRecord,
+): ProviderRecord {
+  const byName = new Map(columns.map((column) => [column.name, column]));
+  const values: Record<string, ProviderScalar | ProviderScalar[]> = {};
+
+  for (const [name, rawValue] of Object.entries(record)) {
+    const column = byName.get(name);
+    if (!column) throw new Error(`Import column "${name}" does not exist on this table.`);
+    if (column.isIdentity) continue;
+    if (rawValue === "" && column.defaultValue) continue;
+    values[name] = parseTransferValue(column, rawValue);
+  }
+
+  for (const column of columns) {
+    if (column.isIdentity || column.name in values) continue;
+    if (column.defaultValue) continue;
+    if (!column.nullable) {
+      throw new Error(`Import rows must include required column "${column.name}".`);
+    }
+  }
+  if (Object.keys(values).length === 0) throw new Error("Import rows contain no writable columns.");
+  return values;
+}
+
+function parseTransferValue(
+  column: TransferColumn,
+  value: TransferValue,
+): ProviderScalar | string[] {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === "") {
+    if (column.nullable) return null;
+    throw new Error(`Column "${column.name}" cannot be null.`);
+  }
+  const text = String(value);
+  const normalizedType = column.dataType.toLowerCase();
+  if (/^(smallint|integer|bigint|decimal|numeric|real|double precision)$/.test(normalizedType)) {
+    const parsed = Number(text);
+    if (!Number.isFinite(parsed)) throw new Error(`Column "${column.name}" must contain a number.`);
+    return parsed;
+  }
+  if (normalizedType === "boolean") {
+    if (/^(true|t|1)$/i.test(text)) return true;
+    if (/^(false|f|0)$/i.test(text)) return false;
+    throw new Error(`Column "${column.name}" must contain true or false.`);
+  }
+  return text;
 }
