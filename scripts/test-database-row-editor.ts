@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { duplicateRowValues, prepareRowInputValues } from "../apps/web/src/lib/database-row-editor";
+import {
+  duplicateRowValues,
+  prepareRowInputValues,
+  prepareRowPatchValues,
+} from "../apps/web/src/lib/database-row-editor";
 
 const columns = [
   { name: "id", dataType: "integer", nullable: false, defaultValue: "identity", isIdentity: true },
@@ -77,5 +81,19 @@ test("row duplication preserves values but never copies the identity", () => {
       published: false,
       note: null,
     },
+  );
+});
+
+test("bulk edit prepares one typed patch and rejects unsafe targets", () => {
+  assert.deepEqual(prepareRowPatchValues(columns, { count: "8" }), { count: 8 });
+  assert.deepEqual(prepareRowPatchValues(columns, { note: "" }), { note: null });
+  assert.throws(() => prepareRowPatchValues(columns, { id: "3" }), /id cannot be changed/);
+  assert.throws(
+    () => prepareRowPatchValues(columns, { missing: "value" }),
+    /missing is not a column/,
+  );
+  assert.throws(
+    () => prepareRowPatchValues(columns, { published: "maybe" }),
+    /published must be true or false/,
   );
 });

@@ -746,6 +746,80 @@ function createDatabaseProvider(
       }
       return normalizeRow(rows[0], 0);
     },
+    async updateRows(table, identities, values): Promise<readonly NormalizedRow[]> {
+      const reference = splitTableReference(table);
+      if (identities.length === 0 || identities.length > 50) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk editing requires between 1 and 50 row identities.",
+          { provider: "supabase", operation: "bulk update database rows" },
+        );
+      }
+      const identityColumn = identities[0]?.column.trim();
+      if (!identityColumn) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk editing requires a stable row identity.",
+          { provider: "supabase", operation: "bulk update database rows" },
+        );
+      }
+      quoteIdentifier(identityColumn);
+      if (
+        identities.some(
+          (identity) => identity.column.trim() !== identityColumn || identity.value === null,
+        )
+      ) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk editing identities must use one non-null column.",
+          { provider: "supabase", operation: "bulk update database rows" },
+        );
+      }
+      const entries = Object.entries(values);
+      if (entries.length === 0) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk editing requires at least one column value.",
+          { provider: "supabase", operation: "bulk update database rows" },
+        );
+      }
+      if (entries.some(([column]) => column === identityColumn)) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "A bulk edit cannot change the row identity.",
+          { provider: "supabase", operation: "bulk update database rows" },
+        );
+      }
+      const primaryKeyRows = await client.query<{ column_name: string }>(
+        `SELECT k.column_name
+         FROM information_schema.key_column_usage k
+         JOIN information_schema.table_constraints tc
+           ON tc.constraint_name = k.constraint_name
+          AND tc.table_schema = k.table_schema
+          AND tc.table_name = k.table_name
+         WHERE k.table_schema = $1 AND k.table_name = $2
+           AND tc.constraint_type = 'PRIMARY KEY'
+         ORDER BY k.ordinal_position`,
+        [reference.schema, reference.table],
+      );
+      if (primaryKeyRows.length !== 1 || primaryKeyRows[0]?.column_name !== identityColumn) {
+        throw new ProviderError(
+          "invalid_configuration",
+          "Bulk editing requires a single-column primary key.",
+          { provider: "supabase", operation: "bulk update database rows" },
+        );
+      }
+      const assignments = entries
+        .map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`)
+        .join(", ");
+      const identityOffset = entries.length + 1;
+      const placeholders = identities.map((_, index) => `$${identityOffset + index}`).join(", ");
+      const rows = await client.query<Record<string, unknown>>(
+        `UPDATE ${quoteIdentifier(reference.schema)}.${quoteIdentifier(reference.table)} SET ${assignments} WHERE ${quoteIdentifier(identityColumn)} IN (${placeholders}) RETURNING *`,
+        [...entries.map(([, value]) => value), ...identities.map((identity) => identity.value)],
+      );
+      return rows.map((row, index) => normalizeRow(row, index, identityColumn));
+    },
     async deleteRow(table, identity): Promise<NormalizedRow> {
       const reference = splitTableReference(table);
       const rows = await client.query<Record<string, unknown>>(

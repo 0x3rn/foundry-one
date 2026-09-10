@@ -121,6 +121,7 @@ function parseMutationBody(value: unknown): {
   readonly operation:
     | "insert"
     | "update"
+    | "bulk-update"
     | "delete"
     | "prepare-delete"
     | "bulk-delete"
@@ -148,6 +149,7 @@ function parseMutationBody(value: unknown): {
       [
         "insert",
         "update",
+        "bulk-update",
         "delete",
         "prepare-delete",
         "bulk-delete",
@@ -158,7 +160,7 @@ function parseMutationBody(value: unknown): {
     ).includes(body.operation)
   ) {
     throw new SupabaseCredentialError(
-      "operation must be insert, update, delete, prepare-delete, bulk-delete, prepare-bulk-delete, create-table, or add-column.",
+      "operation must be insert, update, bulk-update, delete, prepare-delete, bulk-delete, prepare-bulk-delete, create-table, or add-column.",
     );
   }
   if (typeof body.table !== "string" || !body.table.trim()) {
@@ -241,6 +243,7 @@ function parseMutationBody(value: unknown): {
     operation: body.operation as
       | "insert"
       | "update"
+      | "bulk-update"
       | "delete"
       | "prepare-delete"
       | "bulk-delete"
@@ -454,6 +457,13 @@ export async function POST(
     ) {
       return errorResponse("VALUES_REQUIRED", "At least one value is required.", 400);
     }
+    if (input.operation === "bulk-update" && (!input.identities || !input.values)) {
+      return errorResponse(
+        "BULK_UPDATE_INPUT_REQUIRED",
+        "Bulk updates require selected row identities and values.",
+        400,
+      );
+    }
     if (input.operation === "delete" && !input.confirmationToken) {
       return errorResponse(
         "CONFIRMATION_REQUIRED",
@@ -619,6 +629,20 @@ export async function POST(
             return service.deleteRows(
               input.table,
               input.identities as NonNullable<typeof input.identities>,
+            );
+          }
+          if (input.operation === "bulk-update") {
+            if (!service.updateRows) {
+              throw new ProviderError(
+                "capability_unsupported",
+                "This connection does not support bulk row updates.",
+                { provider: "supabase", operation: "database.row.bulk-update" },
+              );
+            }
+            return service.updateRows(
+              input.table,
+              input.identities as NonNullable<typeof input.identities>,
+              values,
             );
           }
           if (input.operation === "create-table") {

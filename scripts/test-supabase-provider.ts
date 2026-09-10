@@ -206,6 +206,9 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
       if (query.includes("DELETE FROM") && query.includes(" IN (")) {
         return [rows[0], rows[1]];
       }
+      if (query.includes("UPDATE") && query.includes(" IN (")) {
+        return [rows[0], rows[1]];
+      }
       if (query.includes("SELECT 1 AS ok")) return [];
       return rows;
     },
@@ -336,6 +339,22 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     { column: "id", value: 3 },
   ]);
   assert.equal(bulkDeleted?.length, 2);
+  const bulkUpdated = await provider.services.database?.updateRows?.(
+    "public.orders",
+    [
+      { column: "id", value: 2 },
+      { column: "id", value: 3 },
+    ],
+    { label: "bulk-updated" },
+  );
+  assert.equal(bulkUpdated?.length, 2);
+  await assert.rejects(
+    () =>
+      provider.services.database?.updateRows?.("public.orders", [{ column: "id", value: 2 }], {
+        id: 10,
+      }),
+    (error: unknown) => error instanceof ProviderError && error.code === "invalid_configuration",
+  );
   await assert.rejects(
     () =>
       provider.services.database?.deleteRows?.("public.orders", [

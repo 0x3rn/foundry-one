@@ -10,6 +10,7 @@ import {
 import {
   duplicateRowValues,
   prepareRowInputValues,
+  prepareRowPatchValues,
   type RowEditorInput,
 } from "@/lib/database-row-editor";
 
@@ -117,6 +118,9 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
   const [newRowValues, setNewRowValues] = useState<RowEditorInput>({});
   const [selectedRowIds, setSelectedRowIds] = useState<ReadonlySet<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkEditing, setIsBulkEditing] = useState(false);
+  const [bulkEditColumn, setBulkEditColumn] = useState("");
+  const [bulkEditValue, setBulkEditValue] = useState("");
   const [error, setError] = useState<string>();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -167,6 +171,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         setRows(page.items);
         setNextCursor(page.nextCursor);
         setSelectedRowIds(new Set());
+        setIsBulkEditing(false);
       })
       .catch((caught: unknown) => {
         if (active)
@@ -213,6 +218,7 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       setRows(page.items);
       setNextCursor(page.nextCursor);
       setSelectedRowIds(new Set());
+      setIsBulkEditing(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The next page could not be loaded.");
     } finally {
@@ -325,6 +331,61 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       }
       return next;
     });
+  }
+
+  function startBulkEditing() {
+    const firstEditableColumn = columns.find((column) => !column.isIdentity);
+    if (!firstEditableColumn) {
+      setError("This table has no editable columns.");
+      return;
+    }
+    setError(undefined);
+    setBulkEditColumn(firstEditableColumn.name);
+    setBulkEditValue("");
+    setIsBulkEditing(true);
+  }
+
+  function cancelBulkEditing() {
+    setIsBulkEditing(false);
+    setBulkEditColumn("");
+    setBulkEditValue("");
+  }
+
+  async function applyBulkEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTable || selectedRowIds.size === 0) return;
+    const selectedRows = rows.filter((row) => selectedRowIds.has(row.id));
+    const identities = selectedRows.flatMap((row) => (row.identity ? [row.identity] : []));
+    if (identities.length !== selectedRows.length) {
+      setError("Every selected row must have a stable single-column identity.");
+      return;
+    }
+    setError(undefined);
+    try {
+      const values = prepareRowPatchValues(columns, { [bulkEditColumn]: bulkEditValue });
+      const response = await fetch(`/api/projects/${projectId}/database`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          operation: "bulk-update",
+          table: selectedTable,
+          identities,
+          values,
+        }),
+      });
+      const body = (await response.json()) as ApiResponse<readonly DatabaseRow[]>;
+      if (!response.ok || !body.data) {
+        throw new Error(body.error?.message ?? "The selected rows could not be updated.");
+      }
+      setSelectedRowIds(new Set());
+      cancelBulkEditing();
+      setIsTableLoading(true);
+      setReloadToken((current) => current + 1);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "The selected rows could not be updated.",
+      );
+    }
   }
 
   async function deleteSelectedRows() {
@@ -713,16 +774,55 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
       {selectedRowIds.size > 0 ? (
         <div className="foundry-database-bulk-actions" aria-live="polite">
           <strong>{selectedRowIds.size} rows selected</strong>
-          <button type="button" disabled={isBulkDeleting} onClick={deleteSelectedRows}>
-            {isBulkDeleting ? "Deleting…" : "Delete selected"}
-          </button>
-          <button
-            type="button"
-            disabled={isBulkDeleting}
-            onClick={() => setSelectedRowIds(new Set())}
-          >
-            Clear selection
-          </button>
+          {!isBulkEditing ? (
+            <>
+              <button type="button" disabled={isBulkDeleting} onClick={startBulkEditing}>
+                Bulk edit
+              </button>
+              <button type="button" disabled={isBulkDeleting} onClick={deleteSelectedRows}>
+                {isBulkDeleting ? "Deleting…" : "Delete selected"}
+              </button>
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => setSelectedRowIds(new Set())}
+              >
+                Clear selection
+              </button>
+            </>
+          ) : (
+            <form onSubmit={applyBulkEdit}>
+              <label>
+                Column
+                <select
+                  value={bulkEditColumn}
+                  onChange={(event) => {
+                    setBulkEditColumn(event.target.value);
+                    setBulkEditValue("");
+                  }}
+                >
+                  {columns
+                    .filter((column) => !column.isIdentity)
+                    .map((column) => (
+                      <option key={column.id} value={column.name}>
+                        {column.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Value
+                <input
+                  value={bulkEditValue}
+                  onChange={(event) => setBulkEditValue(event.target.value)}
+                />
+              </label>
+              <button type="submit">Apply edit</button>
+              <button type="button" onClick={cancelBulkEditing}>
+                Cancel
+              </button>
+            </form>
+          )}
         </div>
       ) : null}
       {error ? <p className="foundry-database-error">{error}</p> : null}

@@ -45,11 +45,35 @@ export function duplicateRowValues(
   return values;
 }
 
-function parseInputValue(column: RowEditorColumn, rawValue: string): ProviderScalar | undefined {
+export function prepareRowPatchValues(
+  columns: readonly RowEditorColumn[],
+  input: RowEditorInput,
+): ProviderRecord {
+  const columnsByName = new Map(columns.map((column) => [column.name, column]));
+  const values: Record<string, ProviderScalar> = {};
+  for (const [name, rawValue] of Object.entries(input)) {
+    const column = columnsByName.get(name);
+    if (!column) throw new Error(`${name} is not a column in this table.`);
+    if (column.isIdentity) throw new Error(`${name} cannot be changed.`);
+    const value = parseInputValue(column, rawValue, false);
+    if (value === undefined) throw new Error(`${name} needs an explicit value for bulk edit.`);
+    values[name] = value;
+  }
+  if (Object.keys(values).length === 0) {
+    throw new Error("Choose a column value before applying a bulk edit.");
+  }
+  return values;
+}
+
+function parseInputValue(
+  column: RowEditorColumn,
+  rawValue: string,
+  allowDefaultOmission = true,
+): ProviderScalar | undefined {
   if (column.isIdentity) return undefined;
   const value = rawValue.trim();
   if (!value) {
-    if (column.defaultValue !== undefined) return undefined;
+    if (allowDefaultOmission && column.defaultValue !== undefined) return undefined;
     if (column.nullable) return null;
     throw new Error(`${column.name} is required.`);
   }

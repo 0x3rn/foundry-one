@@ -175,6 +175,11 @@ export interface DatabaseProvider {
     identity: { readonly column: string; readonly value: ProviderScalar },
     values: ProviderRecord,
   ): Promise<NormalizedRow>;
+  updateRows?(
+    table: string,
+    identities: readonly { readonly column: string; readonly value: ProviderScalar }[],
+    values: ProviderRecord,
+  ): Promise<readonly NormalizedRow[]>;
   deleteRow?(
     table: string,
     identity: { readonly column: string; readonly value: ProviderScalar },
