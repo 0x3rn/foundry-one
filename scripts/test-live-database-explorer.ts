@@ -35,12 +35,25 @@ try {
   const provider = createSupabaseProvider(credentials);
   lifecycle = new ProviderLifecycle(provider);
   const connection = await lifecycle.connect();
-  if (connection.state === "disconnected")
-    throw new Error("The provider connection is disconnected.");
 
   const service = provider.services.database;
   if (!service?.listTables || !service.describeCatalog) {
     throw new Error("The connected provider does not expose the database explorer contract.");
+  }
+  const projectHost = new URL(credentials.projectUrl).hostname;
+  const databaseHost = credentials.databaseUrl ? new URL(credentials.databaseUrl).hostname : null;
+  if (connection.state === "disconnected") {
+    console.log(
+      JSON.stringify({
+        projectId: project.id,
+        connectionState: connection.state,
+        reason: connection.reason ?? "unavailable",
+        projectHost,
+        databaseHost,
+        hasManagementApiToken: Boolean(credentials.managementApiToken),
+        hasDatabaseUrl: Boolean(credentials.databaseUrl),
+      }),
+    );
   }
   const tables = await service.listTables();
   const catalog = await service.describeCatalog();
@@ -48,6 +61,8 @@ try {
     JSON.stringify({
       projectId: project.id,
       connectionState: connection.state,
+      projectHost,
+      databaseHost,
       tables: tables.length,
       views: tables.filter((table) => table.isView && !table.isMaterializedView).length,
       materializedViews: tables.filter((table) => table.isMaterializedView).length,
@@ -60,7 +75,10 @@ try {
   console.error(
     JSON.stringify({
       error: error instanceof Error ? error.name : "UnknownError",
-      message: error instanceof Error ? error.message : "Live database verification failed.",
+      message:
+        error instanceof Error && error.name === "PostgresError"
+          ? "Supabase rejected the saved database connection."
+          : "Live database verification failed.",
     }),
   );
   process.exitCode = 1;
