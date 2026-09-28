@@ -99,6 +99,18 @@ export interface DatabaseCatalog {
   readonly extensions: readonly DatabaseExtension[];
 }
 
+export interface DatabaseQueryResult {
+  readonly columns: readonly string[];
+  readonly rows: readonly ProviderRecord[];
+  readonly rowCount: number;
+  readonly truncated: boolean;
+  readonly durationMs: number;
+}
+
+export interface DatabaseQueryOptions {
+  readonly maxRows?: number;
+}
+
 export interface DatabaseColumnDefinition {
   readonly name: string;
   readonly dataType: string;
@@ -203,6 +215,7 @@ export interface NormalizedFinding {
 export interface DatabaseProvider {
   listTables(): Promise<readonly NormalizedTable[]>;
   listRows(table: string, query?: DatabaseRowQuery | string): Promise<ProviderPage<NormalizedRow>>;
+  executeQuery?(query: string, options?: DatabaseQueryOptions): Promise<DatabaseQueryResult>;
   listColumns?(table: string): Promise<readonly NormalizedColumn[]>;
   describeTable?(table: string): Promise<DatabaseTableDetails>;
   describeCatalog?(): Promise<DatabaseCatalog>;

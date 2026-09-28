@@ -14,6 +14,8 @@ import type {
   DatabaseIndex,
   DatabaseIndexDefinition,
   DatabasePolicy,
+  DatabaseQueryOptions,
+  DatabaseQueryResult,
   DatabaseRelation,
   DatabaseRowQuery,
   DatabaseSchema,
@@ -27,6 +29,7 @@ import type {
   NormalizedUser,
   ProviderConnectionResult,
   ProviderPage,
+  ProviderRecord,
   ProviderProjectMetadata,
   ProviderServices,
   ProviderScalar,
@@ -782,6 +785,25 @@ function createDatabaseProvider(
               } satisfies DatabaseTableStatistics,
             }
           : {}),
+      };
+    },
+    async executeQuery(query, options: DatabaseQueryOptions = {}): Promise<DatabaseQueryResult> {
+      const startedAt = Date.now();
+      const maxRows = Number.isInteger(options.maxRows)
+        ? Math.min(1_000, Math.max(1, options.maxRows as number))
+        : 100;
+      const rows = await client.query<Record<string, unknown>>(query);
+      const normalizedRows = rows.slice(0, maxRows).map((row) => {
+        return Object.fromEntries(
+          Object.entries(row).map(([key, value]) => [key, normalizeRowValue(value)]),
+        ) as ProviderRecord;
+      });
+      return {
+        columns: normalizedRows[0] ? Object.keys(normalizedRows[0]) : [],
+        rows: normalizedRows,
+        rowCount: rows.length,
+        truncated: rows.length > maxRows,
+        durationMs: Date.now() - startedAt,
       };
     },
     async listRows(table, query): Promise<ProviderPage<NormalizedRow>> {

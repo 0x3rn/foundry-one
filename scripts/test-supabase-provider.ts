@@ -271,6 +271,18 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
     isMaterializedView: false,
     rowCount: 50,
   });
+  const queryResult = await provider.services.database?.executeQuery?.(
+    "SELECT id, label FROM public.orders",
+    { maxRows: 1 },
+  );
+  assert.deepEqual(queryResult && { ...queryResult, durationMs: 0 }, {
+    columns: ["id", "label"],
+    rows: [{ id: 1, label: "row-1" }],
+    rowCount: 51,
+    truncated: true,
+    durationMs: 0,
+  });
+  assert.ok((queryResult?.durationMs ?? -1) >= 0);
   assert.deepEqual(await provider.services.database?.describeCatalog?.(), {
     schemas: [{ name: "public" }],
     functions: [
