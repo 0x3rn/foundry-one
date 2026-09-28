@@ -346,6 +346,10 @@ function defaultDatabaseClient(databaseUrl: string): SupabaseDatabaseClient {
     connect_timeout: 10,
     idle_timeout: 10,
     ssl: "require",
+    connection: {
+      statement_timeout: DEFAULT_TIMEOUT_MS,
+      lock_timeout: DEFAULT_TIMEOUT_MS,
+    },
   });
   return {
     async query<T extends Record<string, unknown>>(query: string, parameters = []) {
@@ -583,34 +587,36 @@ function createDatabaseProvider(
       }));
     },
     async describeCatalog(): Promise<DatabaseCatalog> {
-      const [schemas, functions, extensions] = await Promise.all([
-        client.query<{ schema_name: string }>(
-          `SELECT schema_name
-           FROM information_schema.schemata
-           WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
-           ORDER BY schema_name`,
-        ),
-        client.query<{
-          oid: number;
-          schema_name: string;
-          function_name: string;
-          return_type: string;
-          language_name: string;
-        }>(
-          `SELECT p.oid, n.nspname AS schema_name, p.proname AS function_name,
-                  pg_get_function_result(p.oid) AS return_type, l.lanname AS language_name
-           FROM pg_proc p
-           JOIN pg_namespace n ON n.oid = p.pronamespace
-           JOIN pg_language l ON l.oid = p.prolang
-           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-           ORDER BY n.nspname, p.proname, p.oid`,
-        ),
-        client.query<{ extname: string; extversion: string }>(
-          `SELECT extname, extversion
-           FROM pg_extension
-           ORDER BY extname`,
-        ),
-      ]);
+      // The default client uses one connection. Keep these catalog reads
+      // sequential so postgres.js cannot leave queued introspection queries
+      // unresolved when the provider is connected to a managed Supabase
+      // database.
+      const schemas = await client.query<{ schema_name: string }>(
+        `SELECT schema_name
+         FROM information_schema.schemata
+         WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY schema_name`,
+      );
+      const functions = await client.query<{
+        oid: number;
+        schema_name: string;
+        function_name: string;
+        return_type: string;
+        language_name: string;
+      }>(
+        `SELECT p.oid, n.nspname AS schema_name, p.proname AS function_name,
+                pg_get_function_result(p.oid) AS return_type, l.lanname AS language_name
+         FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+         JOIN pg_language l ON l.oid = p.prolang
+         WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY n.nspname, p.proname, p.oid`,
+      );
+      const extensions = await client.query<{ extname: string; extversion: string }>(
+        `SELECT extname, extversion
+         FROM pg_extension
+         ORDER BY extname`,
+      );
       return {
         schemas: schemas.map((schema) => ({ name: schema.schema_name }) satisfies DatabaseSchema),
         functions: functions.map(

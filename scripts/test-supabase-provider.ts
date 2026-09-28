@@ -503,3 +503,58 @@ test("Supabase database adapter introspects safely and paginates rows", async ()
   );
   await provider.disconnect();
 });
+
+test("Supabase catalog introspection serializes reads for single-connection clients", async () => {
+  let activeQueries = 0;
+  const database: SupabaseDatabaseClient = {
+    async query(query) {
+      assert.equal(activeQueries, 0);
+      activeQueries += 1;
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        if (query.includes("information_schema.schemata")) {
+          return [{ schema_name: "public" }];
+        }
+        if (query.includes("FROM pg_proc")) {
+          return [
+            {
+              oid: 7,
+              schema_name: "public",
+              function_name: "health",
+              return_type: "boolean",
+              language_name: "sql",
+            },
+          ];
+        }
+        if (query.includes("FROM pg_extension")) {
+          return [{ extname: "pgcrypto", extversion: "1.3" }];
+        }
+        throw new Error(`unexpected query: ${query}`);
+      } finally {
+        activeQueries -= 1;
+      }
+    },
+    async end() {},
+  };
+  const provider = new SupabaseProvider(
+    parseSupabaseCredentials({ ...credentials, databaseUrl: "postgresql://db.example/foundry" }),
+    clientFor({}),
+    database,
+  );
+
+  await assert.doesNotReject(async () => {
+    assert.deepEqual(await provider.services.database?.describeCatalog(), {
+      schemas: [{ name: "public" }],
+      functions: [
+        {
+          id: "public.health.7",
+          schema: "public",
+          name: "health",
+          returnType: "boolean",
+          language: "sql",
+        },
+      ],
+      extensions: [{ name: "pgcrypto", version: "1.3" }],
+    });
+  });
+});
