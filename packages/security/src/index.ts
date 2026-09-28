@@ -170,6 +170,173 @@ export function isDangerousAction(action: string): action is SensitiveAction {
   return confirmationActions.includes(action as SensitiveAction);
 }
 
+export type SqlStatementKind = "read_only" | "mutation" | "destructive" | "critical";
+
+export interface SqlClassification {
+  readonly kind: SqlStatementKind;
+  readonly normalizedSql: string;
+  readonly statementCount: number;
+  readonly requiresConfirmation: boolean;
+  readonly reason: string;
+}
+
+export class SqlValidationError extends Error {
+  readonly code = "INVALID_SQL" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "SqlValidationError";
+  }
+}
+
+function stripSqlCommentsAndLiterals(sql: string): string {
+  let output = "";
+  let index = 0;
+  while (index < sql.length) {
+    const character = sql[index];
+    const next = sql[index + 1];
+    if (character === "-" && next === "-") {
+      index += 2;
+      while (index < sql.length && sql[index] !== "\n") index += 1;
+      output += " ";
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      index += 2;
+      while (index < sql.length && !(sql[index] === "*" && sql[index + 1] === "/")) index += 1;
+      index += 2;
+      output += " ";
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      const quote = character;
+      index += 1;
+      while (index < sql.length) {
+        if (sql[index] === quote && sql[index + 1] === quote) {
+          index += 2;
+          continue;
+        }
+        if (sql[index] === quote) {
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      output += " ";
+      continue;
+    }
+    output += character;
+    index += 1;
+  }
+  return output;
+}
+
+function sqlTokens(sql: string): readonly string[] {
+  return sql
+    .replace(/[^a-zA-Z0-9_$]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token.toUpperCase());
+}
+
+function countSqlStatements(sql: string): number {
+  return sql
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean).length;
+}
+
+export function classifySql(sql: string): SqlClassification {
+  if (typeof sql !== "string" || !sql.trim()) {
+    throw new SqlValidationError("SQL text is required.");
+  }
+
+  const sanitized = stripSqlCommentsAndLiterals(sql);
+  const normalizedSql = sanitized.replace(/\s+/g, " ").trim();
+  const statementCount = countSqlStatements(sanitized);
+  if (!normalizedSql || statementCount === 0) {
+    throw new SqlValidationError("SQL text must contain a statement.");
+  }
+
+  const tokens = sqlTokens(sanitized);
+  const first = tokens[0] ?? "";
+  const hasWhere = tokens.includes("WHERE");
+  const hasBroadPredicate = /\bWHERE\s+(TRUE|1\s*=\s*1)\b/i.test(sanitized);
+  const hasMutatingCte = tokens.some((token) =>
+    ["INSERT", "UPDATE", "DELETE", "MERGE"].includes(token),
+  );
+
+  if (statementCount > 1) {
+    return {
+      kind: "critical",
+      normalizedSql,
+      statementCount,
+      requiresConfirmation: true,
+      reason: "Multiple SQL statements require explicit confirmation.",
+    };
+  }
+
+  if (
+    ["SELECT", "SHOW", "EXPLAIN", "VALUES"].includes(first) ||
+    (first === "WITH" && !hasMutatingCte)
+  ) {
+    return {
+      kind: "read_only",
+      normalizedSql,
+      statementCount,
+      requiresConfirmation: false,
+      reason: "Read-only SQL can run without confirmation.",
+    };
+  }
+
+  if (first === "DELETE" || first === "UPDATE") {
+    const broad = !hasWhere || hasBroadPredicate;
+    return {
+      kind: broad ? "destructive" : "mutation",
+      normalizedSql,
+      statementCount,
+      requiresConfirmation: broad,
+      reason: broad
+        ? `${first} without a narrow predicate requires explicit confirmation.`
+        : `${first} is scoped by a predicate and requires no destructive confirmation.`,
+    };
+  }
+
+  if (
+    ["DROP", "TRUNCATE", "GRANT", "REVOKE", "VACUUM"].includes(first) ||
+    (first === "ALTER" && tokens.includes("DROP")) ||
+    (first === "CREATE" && tokens.includes("DATABASE"))
+  ) {
+    return {
+      kind: "critical",
+      normalizedSql,
+      statementCount,
+      requiresConfirmation: true,
+      reason:
+        "This SQL can cause broad or irreversible changes and requires explicit confirmation.",
+    };
+  }
+
+  if (["INSERT", "MERGE", "CREATE", "ALTER", "COMMENT", "REINDEX", "SET"].includes(first)) {
+    return {
+      kind: "mutation",
+      normalizedSql,
+      statementCount,
+      requiresConfirmation: false,
+      reason: "This SQL changes database state but is not classified as broadly destructive.",
+    };
+  }
+
+  return {
+    kind: "critical",
+    normalizedSql,
+    statementCount,
+    requiresConfirmation: true,
+    reason: "Unknown SQL is held for explicit confirmation before execution.",
+  };
+}
+
 export function createConfirmationChallenge(action: SensitiveAction): ConfirmationChallenge {
   return { action, token: randomBytes(24).toString("base64url") };
 }
