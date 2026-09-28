@@ -10,6 +10,7 @@ if (existsSync(".env.local")) {
 
 const baseUrl = process.env.FOUNDRY_TEST_BASE_URL ?? "http://localhost:3000";
 const email = `foundry-auth-${randomUUID()}@example.test`;
+const workspaceName = `Foundry Auth Test Workspace ${randomUUID().slice(0, 8)}`;
 const password = "Foundry-test-password-123!";
 let cookie = "";
 let userId: string | undefined;
@@ -107,7 +108,7 @@ async function run(): Promise<void> {
 
   const workspaceResponse = await request("/api/workspaces", {
     method: "POST",
-    body: JSON.stringify({ name: "Foundry Auth Test Workspace" }),
+    body: JSON.stringify({ name: workspaceName }),
   });
   await assertStatus(workspaceResponse, 201, "workspace creation");
   const workspaceBody = (await workspaceResponse.json()) as {
