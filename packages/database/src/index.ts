@@ -7,6 +7,16 @@ export {
   ConfirmationChallengeError,
 } from "./confirmation-challenge-store";
 export { PrismaProviderConnectionStore } from "./provider-connection-store";
+export {
+  PrismaSavedQueryStore,
+  SavedQueryError,
+  encodeSavedQueryTitle,
+  parseSavedQueryTitle,
+  type CreateSavedQueryInput,
+  type DeleteSavedQueryInput,
+  type StoredSavedQuery,
+  type UpdateSavedQueryInput,
+} from "./saved-query-store";
 
 export class DatabaseConfigurationError extends Error {
   readonly code = "DATABASE_NOT_CONFIGURED" as const;

@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 import type { WorkspaceRole } from "@foundry/types";
 import type { AuditLogEntry, AuditLogWriter } from "@foundry/observability";
@@ -337,6 +337,15 @@ export function classifySql(sql: string): SqlClassification {
   };
 }
 
+export function sqlConfirmationAction(sqlOrClassification: string | SqlClassification): string {
+  const normalizedSql =
+    typeof sqlOrClassification === "string"
+      ? classifySql(sqlOrClassification).normalizedSql
+      : sqlOrClassification.normalizedSql;
+  const digest = createHash("sha256").update(normalizedSql.trim()).digest("hex").slice(0, 16);
+  return `sql.destructive:${digest}`;
+}
+
 export function createConfirmationChallenge(action: SensitiveAction): ConfirmationChallenge {
   return { action, token: randomBytes(24).toString("base64url") };
 }
@@ -489,7 +498,7 @@ export class FixedWindowRateLimiter {
   }
 }
 
-export interface ExecuteProjectActionInput extends ProjectActionAuthorizationInput {
+export interface ExecuteProjectActionInput<T = unknown> extends ProjectActionAuthorizationInput {
   readonly principal: AuthorizationPrincipal;
   readonly provider?: string;
   readonly resourceType: string;
@@ -497,7 +506,9 @@ export interface ExecuteProjectActionInput extends ProjectActionAuthorizationInp
   readonly requestId: string;
   readonly rateLimitKey?: string;
   readonly rateLimiter?: FixedWindowRateLimiter;
-  readonly execute: () => Promise<unknown>;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly resultMetadata?: (result: T) => Readonly<Record<string, unknown>>;
+  readonly execute: () => Promise<T>;
 }
 
 function errorCode(error: unknown): string {
@@ -506,11 +517,21 @@ function errorCode(error: unknown): string {
     : "UNEXPECTED_ERROR";
 }
 
-function auditEntry(
-  input: ExecuteProjectActionInput,
+function auditEntry<T>(
+  input: ExecuteProjectActionInput<T>,
   result: AuditLogEntry["result"],
   error?: unknown,
+  executionResult?: T,
 ): AuditLogEntry {
+  const dynamicMetadata =
+    result === "success" && input.resultMetadata && executionResult !== undefined
+      ? input.resultMetadata(executionResult)
+      : undefined;
+  const mergedMetadata = {
+    ...(input.metadata ?? {}),
+    ...(dynamicMetadata ?? {}),
+    ...(error ? { errorCode: errorCode(error) } : {}),
+  };
   return {
     actorUserId: input.principal.userId,
     workspaceId: input.workspaceId,
@@ -521,12 +542,12 @@ function auditEntry(
     action: input.action,
     requestId: input.requestId,
     result,
-    metadata: error ? { errorCode: errorCode(error) } : undefined,
+    metadata: Object.keys(mergedMetadata).length > 0 ? mergedMetadata : undefined,
   };
 }
 
 export async function executeAuthorizedProjectAction<T>(
-  input: ExecuteProjectActionInput,
+  input: ExecuteProjectActionInput<T>,
   scopeResolver: ProjectScopeResolver,
   audit: AuditLogWriter,
 ): Promise<T> {
@@ -542,7 +563,7 @@ export async function executeAuthorizedProjectAction<T>(
 
   try {
     const result = await input.execute();
-    await audit.write(auditEntry(input, "success"));
+    await audit.write(auditEntry(input, "success", undefined, result));
     return result as T;
   } catch (error) {
     await audit.write(auditEntry(input, "failure", error));

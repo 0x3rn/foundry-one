@@ -570,3 +570,46 @@ test("Supabase catalog introspection serializes reads for single-connection clie
     });
   });
 });
+
+test("Supabase database adapter estimates affected rows and sanitizes query errors without leaking credentials", async () => {
+  const database: SupabaseDatabaseClient = {
+    async query(query) {
+      if (query.startsWith("EXPLAIN (FORMAT JSON)")) {
+        return [{ "QUERY PLAN": [{ Plan: { "Plan Rows": 42 } }] } as never];
+      }
+      if (query.includes("BROKEN")) {
+        throw new Error(
+          'syntax error near "BROKEN" on postgresql://postgres:supersecret@db.example/foundry',
+        );
+      }
+      return [];
+    },
+    async end() {},
+  };
+  const provider = new SupabaseProvider(
+    parseSupabaseCredentials({ ...credentials, databaseUrl: "postgresql://db.example/foundry" }),
+    clientFor({}),
+    database,
+  );
+
+  const estimated = await provider.services.database?.estimateQueryRows?.(
+    "DELETE FROM public.orders;",
+  );
+  assert.equal(estimated, 42);
+  assert.equal(
+    await provider.services.database?.estimateQueryRows?.("SELECT 1; DELETE FROM public.orders;"),
+    undefined,
+  );
+
+  await assert.rejects(
+    async () => {
+      await provider.services.database?.executeQuery?.("SELECT BROKEN FROM public.orders");
+    },
+    (error: unknown) => {
+      assert.ok(error instanceof ProviderError);
+      assert.match(error.message, /syntax error near "BROKEN"/);
+      assert.doesNotMatch(error.message, /supersecret/);
+      return true;
+    },
+  );
+});

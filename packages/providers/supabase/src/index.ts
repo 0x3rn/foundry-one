@@ -408,6 +408,21 @@ function normalizeRowQuery(query?: DatabaseRowQuery | string): DatabaseRowQuery 
   return typeof query === "string" ? { cursor: query } : (query ?? {});
 }
 
+function sanitizeDatabaseErrorMessage(error: unknown): string {
+  if (!(error instanceof Error) || !error.message.trim()) {
+    return "The SQL query could not be executed.";
+  }
+  const record = error as Error & { detail?: unknown; hint?: unknown };
+  const detail =
+    typeof record.detail === "string" && record.detail.trim() ? ` (${record.detail.trim()})` : "";
+  const hint =
+    typeof record.hint === "string" && record.hint.trim() ? ` Hint: ${record.hint.trim()}` : "";
+  const combined = `${error.message.trim()}${detail}${hint}`
+    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "[REDACTED_DATABASE_URL]")
+    .replace(/(password|secret|token|apikey|api_key)\s*=\s*[^\s,;]+/gi, "$1=[REDACTED]");
+  return combined.slice(0, 320);
+}
+
 function createDatabaseProvider(
   databaseUrl: string,
   client: SupabaseDatabaseClient = defaultDatabaseClient(databaseUrl),
@@ -792,7 +807,16 @@ function createDatabaseProvider(
       const maxRows = Number.isInteger(options.maxRows)
         ? Math.min(1_000, Math.max(1, options.maxRows as number))
         : 100;
-      const rows = await client.query<Record<string, unknown>>(query);
+      let rows: readonly Record<string, unknown>[];
+      try {
+        rows = await client.query<Record<string, unknown>>(query);
+      } catch (error) {
+        if (error instanceof ProviderError) throw error;
+        throw new ProviderError("connection_failed", sanitizeDatabaseErrorMessage(error), {
+          provider: "supabase",
+          operation: "execute SQL query",
+        });
+      }
       const normalizedRows = rows.slice(0, maxRows).map((row) => {
         return Object.fromEntries(
           Object.entries(row).map(([key, value]) => [key, normalizeRowValue(value)]),
@@ -805,6 +829,29 @@ function createDatabaseProvider(
         truncated: rows.length > maxRows,
         durationMs: Date.now() - startedAt,
       };
+    },
+    async estimateQueryRows(query): Promise<number | undefined> {
+      const trimmed = query.trim().replace(/;+\s*$/, "");
+      if (!trimmed || trimmed.includes(";")) return undefined;
+      if (!/^(SELECT|WITH|UPDATE|DELETE|INSERT|VALUES)\b/i.test(trimmed)) {
+        return undefined;
+      }
+      try {
+        const rows = await client.query<Record<string, unknown>>(
+          `EXPLAIN (FORMAT JSON) ${trimmed}`,
+        );
+        const planPayload = rows[0]?.["QUERY PLAN"];
+        const parsed =
+          typeof planPayload === "string" ? (JSON.parse(planPayload) as unknown) : planPayload;
+        const firstPlan = Array.isArray(parsed)
+          ? (parsed[0] as { Plan?: { "Plan Rows"?: unknown } } | undefined)
+          : undefined;
+        const planRows = firstPlan?.Plan?.["Plan Rows"];
+        const numeric = typeof planRows === "number" ? planRows : Number(planRows);
+        return Number.isFinite(numeric) && numeric >= 0 ? Math.round(numeric) : undefined;
+      } catch {
+        return undefined;
+      }
     },
     async listRows(table, query): Promise<ProviderPage<NormalizedRow>> {
       const reference = splitTableReference(table);

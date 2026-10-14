@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifySql, SqlValidationError } from "@foundry/security";
+import { classifySql, sqlConfirmationAction, SqlValidationError } from "@foundry/security";
 
 test("SQL safety classifies read-only queries", () => {
   const result = classifySql("-- inspect rows\nSELECT * FROM public.orders WHERE id = 7;");
@@ -14,6 +14,7 @@ test("SQL safety distinguishes scoped mutations from broad mutations", () => {
   assert.equal(classifySql("DELETE FROM public.orders WHERE id = 7").requiresConfirmation, false);
   assert.equal(classifySql("DELETE FROM public.orders").kind, "destructive");
   assert.equal(classifySql("UPDATE public.orders SET label = 'x'").requiresConfirmation, true);
+  assert.equal(classifySql("DELETE FROM public.orders WHERE 1 = 1").requiresConfirmation, true);
 });
 
 test("SQL safety holds critical and multi-statement input", () => {
@@ -24,6 +25,15 @@ test("SQL safety holds critical and multi-statement input", () => {
     true,
   );
   assert.equal(classifySql("SELECT 'DROP TABLE users'").kind, "read_only");
+});
+
+test("SQL safety binds confirmation action keys to normalized SQL", () => {
+  const first = sqlConfirmationAction("DELETE   FROM public.orders;");
+  const second = sqlConfirmationAction("-- comment\nDELETE FROM public.orders;");
+  const different = sqlConfirmationAction("TRUNCATE TABLE public.orders;");
+  assert.match(first, /^sql\.destructive:[0-9a-f]{16}$/);
+  assert.equal(first, second);
+  assert.notEqual(first, different);
 });
 
 test("SQL safety rejects empty input", () => {

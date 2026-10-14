@@ -216,6 +216,7 @@ export interface DatabaseProvider {
   listTables(): Promise<readonly NormalizedTable[]>;
   listRows(table: string, query?: DatabaseRowQuery | string): Promise<ProviderPage<NormalizedRow>>;
   executeQuery?(query: string, options?: DatabaseQueryOptions): Promise<DatabaseQueryResult>;
+  estimateQueryRows?(query: string): Promise<number | undefined>;
   listColumns?(table: string): Promise<readonly NormalizedColumn[]>;
   describeTable?(table: string): Promise<DatabaseTableDetails>;
   describeCatalog?(): Promise<DatabaseCatalog>;

@@ -40,6 +40,7 @@
     "test:confirmation-challenge": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-confirmation-challenge-store.ts",
     "test:provider-contracts": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-provider-contracts.ts",
     "test:sql-safety": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-sql-safety.ts",
+    "test:sql-studio": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-sql-studio.ts",
     "test:ui-primitives": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-ui-primitives.ts",
     "test:workspace": "node --import ./scripts/test-runtime-shim.mjs --import tsx --test scripts/test-workspace-service.ts",
     "db:generate": "node scripts/run-prisma.mjs generate",

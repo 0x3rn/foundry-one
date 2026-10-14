@@ -1391,6 +1391,321 @@ kbd {
 .foundry-database-error {
   color: var(--danger);
 }
+.foundry-sql-studio {
+  padding: 18px 25px 22px;
+  border-top: 1px solid var(--line);
+}
+.foundry-sql-studio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.foundry-sql-studio-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.foundry-sql-safety-badge {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-muted);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.foundry-sql-safety-badge.is-read_only {
+  border-color: color-mix(in srgb, #4d9277 45%, var(--line));
+  color: #4d9277;
+}
+.foundry-sql-safety-badge.is-mutation {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+  color: #8f621f;
+}
+.foundry-sql-safety-badge.is-destructive,
+.foundry-sql-safety-badge.is-critical {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+  color: var(--danger);
+}
+.foundry-sql-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.foundry-sql-tab {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+.foundry-sql-tab.is-active {
+  border-color: var(--ink);
+  box-shadow: inset 0 -2px var(--amber);
+}
+.foundry-sql-tab button {
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  cursor: pointer;
+}
+.foundry-sql-tab.is-active button {
+  color: var(--ink);
+  font-weight: 650;
+}
+.foundry-sql-tab-close {
+  padding-left: 2px !important;
+  color: var(--ink-faint);
+}
+.foundry-sql-tab-add {
+  padding: 6px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  cursor: pointer;
+}
+.foundry-sql-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(240px, 0.75fr);
+  gap: 14px;
+}
+.foundry-sql-main {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.foundry-sql-editor-card,
+.foundry-sql-results,
+.foundry-sql-sidebar-section {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.foundry-sql-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-sql-editor-toolbar label {
+  display: grid;
+  gap: 4px;
+}
+.foundry-sql-editor-toolbar input,
+.foundry-sql-editor-toolbar select,
+.foundry-sql-save-bar input {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+.foundry-sql-editor-actions {
+  display: flex;
+  gap: 6px;
+}
+.foundry-sql-textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-muted);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.foundry-sql-highlight {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.sql-token-keyword {
+  color: #8f621f;
+  font-weight: 700;
+}
+.sql-token-string {
+  color: #4d9277;
+}
+.sql-token-number {
+  color: #5579a6;
+}
+.sql-token-comment {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+.foundry-sql-autocomplete {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-sql-autocomplete button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-muted);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  cursor: pointer;
+}
+.foundry-sql-autocomplete small {
+  color: var(--ink-faint);
+  font-size: 8px;
+}
+.foundry-sql-confirmation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+  font-size: 10px;
+}
+.foundry-sql-confirmation p {
+  margin: 4px 0;
+  color: var(--ink-soft);
+}
+.foundry-sql-confirmation small {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.foundry-sql-confirmation-actions,
+.foundry-sql-results-actions {
+  display: flex;
+  gap: 6px;
+}
+.foundry-sql-save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-sql-save-bar button,
+.foundry-sql-results-actions button,
+.foundry-sql-delete-btn {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-muted);
+  color: var(--ink-soft);
+  font-size: 9px;
+  cursor: pointer;
+}
+.foundry-sql-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 10px;
+}
+.foundry-sql-results-header span {
+  margin-left: 8px;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.foundry-sql-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+.foundry-sql-sidebar-section h5 {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.foundry-sql-folder-group {
+  margin-bottom: 8px;
+}
+.foundry-sql-folder-group strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 10px;
+}
+.foundry-sql-folder-group ul,
+.foundry-sql-history-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.foundry-sql-folder-group li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.foundry-sql-folder-group li > button:first-child,
+.foundry-sql-history-list button {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-muted);
+  color: var(--ink);
+  font-size: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+.foundry-sql-folder-group small,
+.foundry-sql-history-list code {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .foundry-surface-panel {
   padding-bottom: 24px;
 }

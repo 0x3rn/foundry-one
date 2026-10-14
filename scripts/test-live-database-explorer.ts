@@ -1,5 +1,10 @@
+import assert from "node:assert/strict";
 import { loadEnvFile } from "node:process";
-import { createDatabaseClient, PrismaProviderConnectionStore } from "@foundry/database";
+import {
+  createDatabaseClient,
+  PrismaProviderConnectionStore,
+  PrismaSavedQueryStore,
+} from "@foundry/database";
 import { createKeyringFromEnvironment, CredentialVault } from "@foundry/encryption";
 import { ProviderLifecycle } from "@foundry/providers-core";
 import { createSupabaseProvider } from "@foundry/providers-supabase";
@@ -13,6 +18,16 @@ try {
     where: { providerConnections: { some: { provider: "supabase" } } },
     select: {
       id: true,
+      workspaceId: true,
+      workspace: {
+        select: {
+          members: {
+            orderBy: { createdAt: "asc" },
+            take: 1,
+            select: { userId: true },
+          },
+        },
+      },
       providerConnections: {
         where: { provider: "supabase" },
         orderBy: { createdAt: "asc" },
@@ -21,7 +36,7 @@ try {
       },
     },
   });
-  if (!project?.providerConnections[0])
+  if (!project?.providerConnections[0] || !project.workspace.members[0])
     throw new Error("No Supabase project connection was found.");
 
   const stored = await new PrismaProviderConnectionStore(database).findById(
@@ -37,8 +52,15 @@ try {
   const connection = await lifecycle.connect();
 
   const service = provider.services.database;
-  if (!service?.listTables || !service.describeCatalog) {
-    throw new Error("The connected provider does not expose the database explorer contract.");
+  if (
+    !service?.listTables ||
+    !service.describeCatalog ||
+    !service.executeQuery ||
+    !service.estimateQueryRows
+  ) {
+    throw new Error(
+      "The connected provider does not expose the database explorer and SQL contract.",
+    );
   }
   const projectHost = new URL(credentials.projectUrl).hostname;
   const databaseHost = credentials.databaseUrl ? new URL(credentials.databaseUrl).hostname : null;
@@ -57,6 +79,33 @@ try {
   }
   const tables = await service.listTables();
   const catalog = await service.describeCatalog();
+  const sqlResult = await service.executeQuery(
+    "SELECT current_schema() AS schema_name, 1 AS health_check;",
+    { maxRows: 10 },
+  );
+  assert.equal(sqlResult.rowCount, 1);
+  assert.equal(sqlResult.truncated, false);
+  const estimatedRows = await service.estimateQueryRows("SELECT 1;");
+
+  const savedQueryStore = new PrismaSavedQueryStore(database);
+  const createdQuery = await savedQueryStore.create({
+    workspaceId: project.workspaceId,
+    projectId: project.id,
+    createdById: project.workspace.members[0].userId,
+    name: "Live schema check",
+    folder: "Diagnostics",
+    sqlText: "SELECT current_schema() AS schema_name;",
+  });
+  const listedQueries = await savedQueryStore.listByProject(project.workspaceId, project.id);
+  assert.ok(
+    listedQueries.some((item) => item.id === createdQuery.id && item.folder === "Diagnostics"),
+  );
+  await savedQueryStore.delete({
+    id: createdQuery.id,
+    workspaceId: project.workspaceId,
+    projectId: project.id,
+  });
+
   console.log(
     JSON.stringify({
       projectId: project.id,
@@ -69,6 +118,10 @@ try {
       schemas: catalog.schemas.length,
       functions: catalog.functions.length,
       extensions: catalog.extensions.length,
+      sqlStudioVerified: true,
+      sqlDurationMs: sqlResult.durationMs,
+      estimatedRows: estimatedRows ?? null,
+      savedQueryRoundtrip: "ok",
     }),
   );
 } catch (error) {
