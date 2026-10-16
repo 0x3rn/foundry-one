@@ -2420,3 +2420,476 @@ kbd {
     animation-iteration-count: 1 !important;
   }
 }
+
+.foundry-db-insights {
+  padding: 18px 25px 24px;
+  border-top: 1px solid var(--line);
+}
+.foundry-db-insights-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.foundry-db-insights-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.foundry-db-insights-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.foundry-db-insights-tabs button {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  cursor: pointer;
+}
+.foundry-db-insights-tabs button.is-active {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 650;
+  box-shadow: inset 0 -2px var(--amber);
+}
+.foundry-db-insights-panel {
+  display: grid;
+  gap: 12px;
+}
+.foundry-database-status {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, #4d9277 45%, var(--line));
+  border-radius: 7px;
+  background: color-mix(in srgb, #4d9277 10%, var(--panel));
+  color: var(--ink);
+  font-size: 10px;
+}
+.foundry-erd-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-erd-toolbar label {
+  display: grid;
+  gap: 4px;
+}
+.foundry-erd-toolbar input[type="search"],
+.foundry-erd-toolbar select,
+.foundry-snapshot-form-row input,
+.foundry-snapshot-schedule-row select,
+.foundry-diff-selectors select,
+.foundry-diff-filter-row select,
+.foundry-diff-filter-row input {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-muted);
+  color: var(--ink);
+  font: inherit;
+}
+.foundry-erd-checkbox {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 4px;
+  color: var(--ink-soft);
+}
+.foundry-erd-summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.foundry-erd-summary-pills span {
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.foundry-erd-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.85fr);
+  gap: 14px;
+}
+.foundry-erd-nodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  align-content: start;
+  gap: 10px;
+  max-height: 440px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.foundry-erd-node-card {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.foundry-erd-node-card.is-focused {
+  border-color: var(--ink);
+  box-shadow: inset 0 2px var(--amber);
+}
+.foundry-erd-node-card.is-connected {
+  border-color: color-mix(in srgb, var(--amber) 65%, var(--line));
+}
+.foundry-erd-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+.foundry-erd-node-header button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.foundry-erd-node-badges {
+  display: inline-flex;
+  gap: 4px;
+}
+.foundry-erd-badge {
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-muted);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+.foundry-erd-column-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.foundry-erd-column-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.foundry-erd-column-list small {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.foundry-erd-key-tag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-style: normal;
+  font-size: 7px;
+  font-weight: 700;
+}
+.foundry-erd-key-tag.is-pk {
+  background: color-mix(in srgb, var(--amber) 35%, var(--panel));
+  color: #8f621f;
+}
+.foundry-erd-key-tag.is-fk {
+  background: color-mix(in srgb, #4d9277 30%, var(--panel));
+  color: #4d9277;
+}
+.foundry-erd-more-cols {
+  color: var(--ink-faint);
+  font-size: 8px;
+}
+.foundry-erd-edges-panel,
+.foundry-snapshot-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.foundry-erd-edges-panel h5,
+.foundry-snapshot-card h5 {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+.foundry-snapshot-card p {
+  margin: 0 0 8px;
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+.foundry-erd-edge-list {
+  display: grid;
+  gap: 6px;
+  max-height: 390px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.foundry-erd-edge-list li {
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.foundry-erd-edge-list li.is-highlighted {
+  border-color: var(--ink);
+}
+.foundry-erd-edge-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 3px;
+}
+.foundry-erd-edge-route button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.foundry-erd-edge-list small {
+  color: var(--ink-faint);
+  font-size: 8px;
+}
+.foundry-snapshots-top-grid,
+.foundry-maintenance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.foundry-snapshot-form-row,
+.foundry-snapshot-schedule-row,
+.foundry-diff-selectors,
+.foundry-diff-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  font-size: 9px;
+}
+.foundry-snapshot-form-row input {
+  flex: 1;
+  min-width: 180px;
+}
+.foundry-snapshot-form-row button,
+.foundry-snapshot-schedule-row button,
+.foundry-diff-selectors button,
+.foundry-advisory-item button {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-muted);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  cursor: pointer;
+}
+.foundry-schedule-meta {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+.foundry-diff-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+.foundry-diff-selectors label {
+  display: grid;
+  gap: 4px;
+  color: var(--ink-faint);
+}
+.foundry-diff-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.foundry-diff-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-soft);
+}
+.foundry-diff-status-pill {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-weight: 650;
+}
+.foundry-diff-status-pill.is-identical {
+  border-color: color-mix(in srgb, #4d9277 45%, var(--line));
+  color: #4d9277;
+}
+.foundry-diff-status-pill.is-changed {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+  color: #8f621f;
+}
+.foundry-diff-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.foundry-diff-badge.is-added,
+.foundry-diff-badge.is-available,
+.foundry-diff-badge.is-bloat-low {
+  border-color: color-mix(in srgb, #4d9277 45%, var(--line));
+  color: #4d9277;
+}
+.foundry-diff-badge.is-modified,
+.foundry-diff-badge.is-warning,
+.foundry-diff-badge.is-unavailable,
+.foundry-diff-badge.is-bloat-moderate {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+  color: #8f621f;
+}
+.foundry-diff-badge.is-removed,
+.foundry-diff-badge.is-critical,
+.foundry-diff-badge.is-bloat-high {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+  color: var(--danger);
+}
+.foundry-advisory-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 55%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--amber) 12%, var(--panel));
+  font-size: 10px;
+}
+.foundry-advisory-banner span {
+  color: var(--ink-soft);
+}
+.foundry-maintenance-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+.foundry-maintenance-stats div {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-muted);
+}
+.foundry-maintenance-stats dt {
+  color: var(--ink-faint);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.foundry-maintenance-stats dd {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 650;
+}
+.foundry-backup-status {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+}
+.foundry-advisory-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.foundry-advisory-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-muted);
+  font-size: 9px;
+}
+.foundry-advisory-main {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 220px;
+}
+.foundry-advisory-main > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.foundry-advisory-main small {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+.foundry-advisory-sql {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+@media (max-width: 960px) {
+  .foundry-erd-layout,
+  .foundry-snapshots-top-grid,
+  .foundry-maintenance-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}

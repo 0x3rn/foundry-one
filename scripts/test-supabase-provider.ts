@@ -613,3 +613,226 @@ test("Supabase database adapter estimates affected rows and sanitizes query erro
     },
   );
 });
+
+test("Supabase database adapter captures normalized schema snapshots and operational maintenance telemetry with graceful degradation", async () => {
+  let activeQueries = 0;
+  const database: SupabaseDatabaseClient = {
+    async query(query) {
+      assert.equal(activeQueries, 0);
+      activeQueries += 1;
+      try {
+        if (query.includes("information_schema.schemata")) {
+          return [{ schema_name: "public" }];
+        }
+        if (query.includes("FROM pg_proc")) {
+          return [
+            {
+              oid: 10,
+              schema_name: "public",
+              function_name: "touch_updated_at",
+              return_type: "trigger",
+              language_name: "plpgsql",
+            },
+          ];
+        }
+        if (query.includes("FROM pg_extension")) {
+          return [{ extname: "pgcrypto", extversion: "1.3" }];
+        }
+        if (query.includes("c.relkind IN")) {
+          return [
+            {
+              schema_name: "public",
+              table_name: "orders",
+              table_type: "BASE TABLE",
+              row_count: "100",
+            },
+          ];
+        }
+        if (query.includes("information_schema.columns")) {
+          return [
+            {
+              table_schema: "public",
+              table_name: "orders",
+              column_name: "id",
+              data_type: "uuid",
+              is_nullable: "NO",
+              column_default: "gen_random_uuid()",
+              is_identity: "NO",
+              is_primary_key: true,
+            },
+            {
+              table_schema: "public",
+              table_name: "orders",
+              column_name: "customer_id",
+              data_type: "uuid",
+              is_nullable: "NO",
+              column_default: null,
+              is_identity: "NO",
+              is_primary_key: false,
+            },
+          ];
+        }
+        if (query.includes("FROM pg_indexes")) {
+          return [
+            {
+              schemaname: "public",
+              tablename: "orders",
+              indexname: "orders_pkey",
+              indexdef: "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)",
+            },
+          ];
+        }
+        if (query.includes("FROM pg_constraint")) {
+          return [
+            {
+              schema_name: "public",
+              table_name: "orders",
+              name: "orders_pkey",
+              contype: "p",
+              definition: "PRIMARY KEY (id)",
+            },
+            {
+              schema_name: "public",
+              table_name: "orders",
+              name: "orders_customer_id_fkey",
+              contype: "f",
+              definition: "FOREIGN KEY (customer_id) REFERENCES auth.users(id)",
+            },
+          ];
+        }
+        if (query.includes("information_schema.referential_constraints")) {
+          return [];
+        }
+        if (query.includes("information_schema.triggers")) {
+          return [
+            {
+              event_object_schema: "public",
+              event_object_table: "orders",
+              trigger_name: "orders_touch_updated_at",
+            },
+          ];
+        }
+        if (query.includes("FROM pg_policies")) {
+          return [
+            {
+              schemaname: "public",
+              tablename: "orders",
+              policyname: "orders_select_own",
+              cmd: "SELECT",
+              roles: ["authenticated"],
+              qual: "(auth.uid() = customer_id)",
+              with_check: null,
+            },
+          ];
+        }
+        if (query.includes("COUNT(*)::int AS total_connections")) {
+          return [
+            {
+              total_connections: 12,
+              active_connections: 3,
+              idle_connections: 8,
+              idle_in_transaction_connections: 1,
+              waiting_connections: 0,
+              max_connections: 100,
+            },
+          ];
+        }
+        if (query.includes("FROM pg_stat_activity") && query.includes("query_preview")) {
+          return [
+            {
+              pid: 401,
+              username: "postgres",
+              application_name: "foundry",
+              state: "active",
+              wait_event_type: null,
+              wait_event: null,
+              duration_ms: 2500,
+              query_preview: "SELECT * FROM orders WHERE password=supersecret",
+            },
+          ];
+        }
+        if (query.includes("FROM pg_locks")) {
+          throw new Error("permission denied for pg_locks");
+        }
+        if (query.includes("FROM pg_stat_user_tables")) {
+          return [
+            {
+              schema_name: "public",
+              table_name: "orders",
+              table_bytes: 16384,
+              index_bytes: 8192,
+              total_bytes: 24576,
+              estimated_rows: 100,
+              live_rows: 100,
+              dead_rows: 40,
+              seq_scans: 20,
+              index_scans: 80,
+              last_vacuum: "2026-10-16 01:00:00+00",
+              last_autovacuum: null,
+              last_analyze: "2026-10-16 01:00:00+00",
+              last_autoanalyze: null,
+            },
+          ];
+        }
+        if (query.includes("FROM pg_stat_user_indexes")) {
+          return [
+            {
+              schema_name: "public",
+              table_name: "orders",
+              index_name: "orders_pkey",
+              definition: "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)",
+              size_bytes: 8192,
+              scans: 80,
+              tuples_read: 80,
+              tuples_fetched: 80,
+              is_unique: true,
+              is_primary: true,
+            },
+          ];
+        }
+        return [];
+      } finally {
+        activeQueries -= 1;
+      }
+    },
+    async end() {},
+  };
+
+  const provider = new SupabaseProvider(
+    parseSupabaseCredentials({ ...credentials, databaseUrl: "postgresql://db.example/foundry" }),
+    clientFor({
+      "https://api.supabase.com/v1/projects/foundry/database/backups": {
+        status: 200,
+        body: {
+          pitr_enabled: true,
+          walg_enabled: true,
+          backups: [
+            {
+              status: "COMPLETED",
+              inserted_at: "2026-10-16T00:00:00.000Z",
+              is_physical_backup: true,
+            },
+          ],
+        },
+      },
+    }),
+    database,
+  );
+
+  const snapshot = await provider.services.database?.captureSchemaSnapshot?.();
+  assert.ok(snapshot);
+  assert.equal(snapshot.tables.length, 1);
+  assert.equal(snapshot.tables[0]?.relations.length, 1);
+  assert.equal(snapshot.tables[0]?.relations[0]?.referencedTable, "auth.users");
+  assert.equal(snapshot.counts.columns, 2);
+
+  const operations = await provider.services.database?.inspectOperations?.();
+  assert.ok(operations);
+  assert.equal(operations.connections.totalConnections, 12);
+  assert.equal(operations.connections.utilizationPercent, 12);
+  assert.equal(operations.longRunningActivities[0]?.queryPreview.includes("supersecret"), false);
+  assert.deepEqual(operations.degradedMetrics, ["locks"]);
+  assert.equal(operations.backup.status, "available");
+  assert.equal(operations.backup.pitrEnabled, true);
+  assert.equal(operations.backup.backupCount, 1);
+});

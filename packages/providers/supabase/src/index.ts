@@ -22,6 +22,15 @@ import type {
   DatabaseTableStatistics,
   DatabaseTableDetails,
   DatabaseProvider,
+  DatabaseActiveActivity,
+  DatabaseBackupMetadata,
+  DatabaseConnectionSummary,
+  DatabaseIndexUsage,
+  DatabaseLockSummary,
+  DatabaseOperationsSnapshot,
+  DatabaseSchemaSnapshot,
+  DatabaseTableMaintenance,
+  DatabaseTableSnapshot,
   NormalizedFile,
   NormalizedColumn,
   NormalizedTable,
@@ -35,7 +44,12 @@ import type {
   ProviderScalar,
   StorageProvider,
 } from "@foundry/providers-core";
-import { ProviderError } from "@foundry/providers-core";
+import {
+  ProviderError,
+  analyzeDatabaseMaintenance,
+  buildSchemaSnapshotFromParts,
+  extractIndexColumnsFromDefinition,
+} from "@foundry/providers-core";
 import type { ProviderCapabilities } from "@foundry/types";
 
 const SUPABASE_MANAGEMENT_API = "https://api.supabase.com";
@@ -423,9 +437,142 @@ function sanitizeDatabaseErrorMessage(error: unknown): string {
   return combined.slice(0, 320);
 }
 
+function sanitizeQueryPreview(query: string): string {
+  return query
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "[REDACTED_DATABASE_URL]")
+    .replace(/(password|secret|token|apikey|api_key)\s*=\s*[^\s,;]+/gi, "$1=[REDACTED]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
+    .slice(0, 220);
+}
+
+async function fetchSupabaseBackupMetadata(
+  credentials?: SupabaseCredentials,
+  httpClient?: SupabaseHttpClient,
+): Promise<DatabaseBackupMetadata> {
+  if (!credentials?.managementApiToken || !httpClient) {
+    return {
+      provider: "supabase",
+      status: "unavailable",
+      reason:
+        "Configure a Supabase Management API token to inspect automated backup and point-in-time recovery (PITR) metadata.",
+    };
+  }
+
+  try {
+    const reference = projectReference(credentials.projectUrl);
+    const response = await httpClient.request(
+      `${SUPABASE_MANAGEMENT_API}/v1/projects/${reference}/database/backups`,
+      {
+        method: "GET",
+        headers: managementHeaders(credentials),
+      },
+    );
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        provider: "supabase",
+        status: "unavailable",
+        reason:
+          "The configured Management API token lacks permission to read database backup metadata.",
+      };
+    }
+
+    if (response.status === 404 || response.status === 501) {
+      return {
+        provider: "supabase",
+        status: "unsupported",
+        reason: "Database backup metadata is not exposed for this Supabase project tier.",
+      };
+    }
+
+    if (response.status < 200 || response.status >= 300) {
+      return {
+        provider: "supabase",
+        status: "unavailable",
+        reason: "Supabase backup metadata is temporarily unavailable.",
+      };
+    }
+
+    const body = (await response.json()) as Record<string, unknown>;
+    const backups = asRecords(body.backups);
+    const pitrEnabled = Boolean(body.pitr_enabled);
+    const walgEnabled = Boolean(body.walg_enabled);
+    const physicalBackupsSupported =
+      typeof body.physical_backup_data === "object" && body.physical_backup_data !== null
+        ? true
+        : backups.some((item) => Boolean(item.is_physical_backup));
+    const latestBackup = backups[0];
+    const latestBackupAt =
+      asString(latestBackup?.inserted_at) ?? asString(latestBackup?.created_at);
+    const latestBackupStatus = asString(latestBackup?.status);
+
+    return {
+      provider: "supabase",
+      status: "available",
+      pitrEnabled,
+      walgEnabled,
+      physicalBackupsSupported,
+      backupCount: backups.length,
+      ...(latestBackupAt ? { latestBackupAt } : {}),
+      ...(latestBackupStatus ? { latestBackupStatus } : {}),
+      restoreSupported: true,
+      note: pitrEnabled
+        ? "Point-in-time recovery (PITR) and automated backups are active."
+        : backups.length > 0
+          ? `${backups.length} scheduled backup${backups.length === 1 ? "" : "s"} recorded by Supabase.`
+          : "Automated backups are managed by Supabase; no snapshots were listed in the response.",
+    };
+  } catch {
+    return {
+      provider: "supabase",
+      status: "unavailable",
+      reason: "Could not reach Supabase Management API to inspect backup metadata.",
+    };
+  }
+}
+
+function mapConstraintTypeChar(type: string): DatabaseConstraint["type"] {
+  return (
+    ({ p: "primary_key", f: "foreign_key", u: "unique", c: "check", x: "exclusion" }[
+      type
+    ] as DatabaseConstraint["type"]) ?? "other"
+  );
+}
+
+function parseForeignKeyConstraintDefinition(
+  defaultSchema: string,
+  definition: string,
+): {
+  readonly columns: string[];
+  readonly referencedTable: string;
+  readonly referencedColumns: string[];
+} | null {
+  const match = /^FOREIGN KEY\s*\(([^)]+)\)\s*REFERENCES\s+([^\s(]+)\s*\(([^)]+)\)/i.exec(
+    definition.trim(),
+  );
+  if (!match?.[1] || !match[2] || !match[3]) return null;
+  const cleanIdent = (value: string): string => value.trim().replace(/^"+|"+$/g, "");
+  const columns = match[1].split(",").map(cleanIdent).filter(Boolean);
+  const referencedColumns = match[3].split(",").map(cleanIdent).filter(Boolean);
+  const rawTarget = match[2].trim();
+  const targetParts = rawTarget.split(".").map(cleanIdent).filter(Boolean);
+  const referencedTable =
+    targetParts.length >= 2
+      ? `${targetParts[0]}.${targetParts[1]}`
+      : `${defaultSchema}.${targetParts[0] ?? rawTarget}`;
+  if (columns.length === 0 || referencedColumns.length === 0) return null;
+  return { columns, referencedTable, referencedColumns };
+}
+
 function createDatabaseProvider(
   databaseUrl: string,
   client: SupabaseDatabaseClient = defaultDatabaseClient(databaseUrl),
+  options?: {
+    readonly credentials?: SupabaseCredentials;
+    readonly httpClient?: SupabaseHttpClient;
+  },
 ): DatabaseProvider {
   return {
     async createTable(schema, table, columns): Promise<NormalizedTable> {
@@ -753,6 +900,17 @@ function createDatabaseProvider(
         current.columns.push(relation.column_name);
         current.referencedColumns.push(relation.foreign_column_name);
         groupedRelations.set(relation.constraint_name, current);
+      }
+      for (const constraint of constraints) {
+        if (constraint.contype === "f" && !groupedRelations.has(constraint.name)) {
+          const parsed = parseForeignKeyConstraintDefinition(
+            reference.schema,
+            constraint.definition,
+          );
+          if (parsed) {
+            groupedRelations.set(constraint.name, parsed);
+          }
+        }
       }
       const primaryIndexNames = new Set(
         constraints
@@ -1128,6 +1286,698 @@ function createDatabaseProvider(
       );
       return rows.map((row, index) => normalizeRow(row, index, identityColumn));
     },
+    async captureSchemaSnapshot(): Promise<DatabaseSchemaSnapshot> {
+      // Execute sequential bulk catalog reads so single-connection clients
+      // never queue overlapping introspection statements across many tables.
+      const schemas = await client.query<{ schema_name: string }>(
+        `SELECT schema_name
+         FROM information_schema.schemata
+         WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY schema_name`,
+      );
+      const functions = await client.query<{
+        oid: number;
+        schema_name: string;
+        function_name: string;
+        return_type: string;
+        language_name: string;
+      }>(
+        `SELECT p.oid, n.nspname AS schema_name, p.proname AS function_name,
+                pg_get_function_result(p.oid) AS return_type, l.lanname AS language_name
+         FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+         JOIN pg_language l ON l.oid = p.prolang
+         WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY n.nspname, p.proname, p.oid`,
+      );
+      const extensions = await client.query<{ extname: string; extversion: string }>(
+        `SELECT extname, extversion
+         FROM pg_extension
+         ORDER BY extname`,
+      );
+      const tableRows = await client.query<{
+        schema_name: string;
+        table_name: string;
+        table_type: string;
+        row_count: number | string | null;
+      }>(
+        `SELECT n.nspname AS schema_name,
+                c.relname AS table_name,
+                CASE c.relkind
+                  WHEN 'r' THEN 'BASE TABLE'
+                  WHEN 'v' THEN 'VIEW'
+                  WHEN 'm' THEN 'MATERIALIZED VIEW'
+                END AS table_type,
+                CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint ELSE NULL END AS row_count
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE c.relkind IN ('r', 'v', 'm')
+           AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY n.nspname, c.relname`,
+      );
+      const columnRows = await client.query<{
+        table_schema?: string;
+        table_name?: string;
+        column_name: string;
+        data_type: string;
+        is_nullable: string;
+        column_default: string | null;
+        is_identity: string;
+        is_primary_key: boolean;
+      }>(
+        `SELECT c.table_schema,
+                c.table_name,
+                c.column_name,
+                c.data_type,
+                c.is_nullable,
+                c.column_default,
+                c.is_identity,
+                EXISTS (
+                  SELECT 1
+                  FROM information_schema.key_column_usage k
+                  JOIN information_schema.table_constraints tc
+                    ON tc.constraint_name = k.constraint_name
+                   AND tc.table_schema = k.table_schema
+                   AND tc.table_name = k.table_name
+                  WHERE k.table_schema = c.table_schema
+                    AND k.table_name = c.table_name
+                    AND k.column_name = c.column_name
+                    AND tc.constraint_type = 'PRIMARY KEY'
+                ) AS is_primary_key
+         FROM information_schema.columns c
+         WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY c.table_schema, c.table_name, c.ordinal_position`,
+      );
+      const indexRows = await client.query<{
+        schemaname?: string;
+        tablename?: string;
+        indexname: string;
+        indexdef: string;
+      }>(
+        `SELECT schemaname, tablename, indexname, indexdef
+         FROM pg_indexes
+         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY schemaname, tablename, indexname`,
+      );
+      const constraintRows = await client.query<{
+        schema_name?: string;
+        table_name?: string;
+        name: string;
+        contype: string;
+        definition: string;
+      }>(
+        `SELECT ns.nspname AS schema_name,
+                rel.relname AS table_name,
+                con.conname AS name,
+                con.contype,
+                pg_get_constraintdef(con.oid) AS definition
+         FROM pg_constraint con
+         JOIN pg_class rel ON rel.oid = con.conrelid
+         JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+         WHERE ns.nspname NOT IN ('pg_catalog', 'information_schema')
+           AND rel.relkind IN ('r', 'v', 'm')
+         ORDER BY ns.nspname, rel.relname, con.conname`,
+      );
+      const relationRows = await client.query<{
+        table_schema?: string;
+        table_name?: string;
+        constraint_name: string;
+        column_name: string;
+        foreign_table_schema: string;
+        foreign_table_name: string;
+        foreign_column_name: string;
+      }>(
+        `SELECT k.table_schema,
+                k.table_name,
+                k.constraint_name,
+                k.column_name,
+                c.table_schema AS foreign_table_schema,
+                c.table_name AS foreign_table_name,
+                c.column_name AS foreign_column_name
+         FROM information_schema.key_column_usage k
+         JOIN information_schema.referential_constraints r
+           ON r.constraint_name = k.constraint_name
+          AND r.constraint_schema = k.constraint_schema
+         JOIN information_schema.constraint_column_usage c
+           ON c.constraint_name = r.unique_constraint_name
+          AND c.constraint_schema = r.unique_constraint_schema
+         WHERE k.table_schema NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY k.table_schema, k.table_name, k.constraint_name, k.ordinal_position`,
+      );
+      const triggerRows = await client.query<{
+        event_object_schema?: string;
+        event_object_table?: string;
+        trigger_name: string;
+      }>(
+        `SELECT event_object_schema, event_object_table, trigger_name
+         FROM information_schema.triggers
+         WHERE event_object_schema NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY event_object_schema, event_object_table, trigger_name`,
+      );
+      const policyRows = await client.query<{
+        schemaname?: string;
+        tablename?: string;
+        policyname: string;
+        cmd: string;
+        roles: string[];
+        qual: string | null;
+        with_check: string | null;
+      }>(
+        `SELECT schemaname, tablename, policyname, cmd, roles, qual, with_check
+         FROM pg_policies
+         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY schemaname, tablename, policyname`,
+      );
+
+      const defaultTableId =
+        tableRows[0] !== undefined
+          ? `${tableRows[0].schema_name}.${tableRows[0].table_name}`
+          : undefined;
+      const resolveTableId = (schema?: string, table?: string): string | undefined =>
+        schema && table ? `${schema}.${table}` : defaultTableId;
+
+      const columnsByTable = new Map<string, NormalizedColumn[]>();
+      for (const row of columnRows) {
+        const tableId = resolveTableId(row.table_schema, row.table_name);
+        if (!tableId) continue;
+        const list = columnsByTable.get(tableId) ?? [];
+        list.push({
+          id: `${tableId}.${row.column_name}`,
+          name: row.column_name,
+          dataType: row.data_type,
+          nullable: row.is_nullable === "YES",
+          ...(row.column_default ? { defaultValue: row.column_default } : {}),
+          isPrimaryKey: Boolean(row.is_primary_key),
+          isIdentity: row.is_identity === "YES",
+        });
+        columnsByTable.set(tableId, list);
+      }
+
+      const constraintsByTable = new Map<string, DatabaseConstraint[]>();
+      const primaryConstraintNamesByTable = new Map<string, Set<string>>();
+      for (const row of constraintRows) {
+        const tableId = resolveTableId(row.schema_name, row.table_name);
+        if (!tableId) continue;
+        const list = constraintsByTable.get(tableId) ?? [];
+        list.push({
+          name: row.name,
+          type: mapConstraintTypeChar(row.contype),
+          definition: row.definition,
+        });
+        constraintsByTable.set(tableId, list);
+        if (row.contype === "p") {
+          const pkSet = primaryConstraintNamesByTable.get(tableId) ?? new Set<string>();
+          pkSet.add(row.name);
+          primaryConstraintNamesByTable.set(tableId, pkSet);
+        }
+      }
+
+      const indexesByTable = new Map<string, DatabaseIndex[]>();
+      for (const row of indexRows) {
+        const tableId = resolveTableId(row.schemaname, row.tablename);
+        if (!tableId) continue;
+        const pkNames = primaryConstraintNamesByTable.get(tableId);
+        const list = indexesByTable.get(tableId) ?? [];
+        list.push({
+          name: row.indexname,
+          definition: row.indexdef,
+          isUnique: /UNIQUE INDEX/i.test(row.indexdef),
+          isPrimary: Boolean(pkNames?.has(row.indexname)),
+        });
+        indexesByTable.set(tableId, list);
+      }
+
+      const groupedRelationsByTable = new Map<
+        string,
+        Map<string, { columns: string[]; referencedTable: string; referencedColumns: string[] }>
+      >();
+      for (const row of relationRows) {
+        const tableId = resolveTableId(row.table_schema, row.table_name);
+        if (!tableId) continue;
+        const tableMap =
+          groupedRelationsByTable.get(tableId) ??
+          new Map<
+            string,
+            { columns: string[]; referencedTable: string; referencedColumns: string[] }
+          >();
+        const current = tableMap.get(row.constraint_name) ?? {
+          columns: [],
+          referencedTable: `${row.foreign_table_schema}.${row.foreign_table_name}`,
+          referencedColumns: [],
+        };
+        current.columns.push(row.column_name);
+        current.referencedColumns.push(row.foreign_column_name);
+        tableMap.set(row.constraint_name, current);
+        groupedRelationsByTable.set(tableId, tableMap);
+      }
+      for (const row of constraintRows) {
+        if (row.contype !== "f") continue;
+        const tableId = resolveTableId(row.schema_name, row.table_name);
+        if (!tableId) continue;
+        const defaultSchema = row.schema_name ?? tableId.split(".")[0] ?? "public";
+        const tableMap =
+          groupedRelationsByTable.get(tableId) ??
+          new Map<
+            string,
+            { columns: string[]; referencedTable: string; referencedColumns: string[] }
+          >();
+        if (!tableMap.has(row.name)) {
+          const parsed = parseForeignKeyConstraintDefinition(defaultSchema, row.definition);
+          if (parsed) {
+            tableMap.set(row.name, parsed);
+            groupedRelationsByTable.set(tableId, tableMap);
+          }
+        }
+      }
+
+      const triggersByTable = new Map<string, string[]>();
+      for (const row of triggerRows) {
+        const tableId = resolveTableId(row.event_object_schema, row.event_object_table);
+        if (!tableId) continue;
+        const list = triggersByTable.get(tableId) ?? [];
+        list.push(row.trigger_name);
+        triggersByTable.set(tableId, list);
+      }
+
+      const policiesByTable = new Map<string, DatabasePolicy[]>();
+      for (const row of policyRows) {
+        const tableId = resolveTableId(row.schemaname, row.tablename);
+        if (!tableId) continue;
+        const list = policiesByTable.get(tableId) ?? [];
+        list.push({
+          name: row.policyname,
+          command: row.cmd,
+          roles: Array.isArray(row.roles) ? row.roles : [],
+          ...(row.qual ? { usingExpression: row.qual } : {}),
+          ...(row.with_check ? { checkExpression: row.with_check } : {}),
+        });
+        policiesByTable.set(tableId, list);
+      }
+
+      const snapshotTables: DatabaseTableSnapshot[] = tableRows.map((row) => {
+        const tableId = `${row.schema_name}.${row.table_name}`;
+        const relationMap = groupedRelationsByTable.get(tableId);
+        const relations: DatabaseRelation[] = relationMap
+          ? [...relationMap.entries()].map(([name, rel]) => ({ name, ...rel }))
+          : [];
+        return {
+          id: tableId,
+          schema: row.schema_name,
+          name: row.table_name,
+          isView: row.table_type !== "BASE TABLE",
+          isMaterializedView: row.table_type === "MATERIALIZED VIEW",
+          columns: columnsByTable.get(tableId) ?? [],
+          indexes: indexesByTable.get(tableId) ?? [],
+          constraints: constraintsByTable.get(tableId) ?? [],
+          relations,
+          policies: policiesByTable.get(tableId) ?? [],
+          triggers: triggersByTable.get(tableId) ?? [],
+        };
+      });
+
+      return buildSchemaSnapshotFromParts({
+        provider: "supabase",
+        catalog: {
+          schemas: schemas.map((item) => ({ name: item.schema_name })),
+          functions: functions.map((item) => ({
+            id: `${item.schema_name}.${item.function_name}.${item.oid}`,
+            schema: item.schema_name,
+            name: item.function_name,
+            returnType: item.return_type,
+            language: item.language_name,
+          })),
+          extensions: extensions.map((item) => ({
+            name: item.extname,
+            version: item.extversion,
+          })),
+        },
+        tables: snapshotTables,
+      });
+    },
+    async inspectOperations(): Promise<DatabaseOperationsSnapshot> {
+      const degradedMetrics: string[] = [];
+
+      let connections: DatabaseConnectionSummary = {
+        totalConnections: 0,
+        activeConnections: 0,
+        idleConnections: 0,
+        idleInTransactionConnections: 0,
+        waitingConnections: 0,
+      };
+      try {
+        const connRows = await client.query<{
+          total_connections: number | string | null;
+          active_connections: number | string | null;
+          idle_connections: number | string | null;
+          idle_in_transaction_connections: number | string | null;
+          waiting_connections: number | string | null;
+          max_connections: number | string | null;
+        }>(
+          `SELECT COUNT(*)::int AS total_connections,
+                  COUNT(*) FILTER (WHERE state = 'active')::int AS active_connections,
+                  COUNT(*) FILTER (WHERE state = 'idle')::int AS idle_connections,
+                  COUNT(*) FILTER (WHERE state LIKE 'idle in transaction%')::int AS idle_in_transaction_connections,
+                  COUNT(*) FILTER (WHERE wait_event_type IS NOT NULL AND state = 'active')::int AS waiting_connections,
+                  (SELECT setting::int FROM pg_settings WHERE name = 'max_connections' LIMIT 1) AS max_connections
+           FROM pg_stat_activity
+           WHERE datname = current_database()`,
+        );
+        const first = connRows[0];
+        if (first) {
+          const total = asFiniteNumber(first.total_connections);
+          const maxConn = asFiniteNumber(first.max_connections);
+          connections = {
+            totalConnections: total,
+            activeConnections: asFiniteNumber(first.active_connections),
+            idleConnections: asFiniteNumber(first.idle_connections),
+            idleInTransactionConnections: asFiniteNumber(first.idle_in_transaction_connections),
+            waitingConnections: asFiniteNumber(first.waiting_connections),
+            ...(maxConn > 0
+              ? {
+                  maxConnections: maxConn,
+                  utilizationPercent: Math.min(100, Math.round((total / maxConn) * 1000) / 10),
+                }
+              : {}),
+          };
+        }
+      } catch {
+        degradedMetrics.push("connections");
+      }
+
+      let longRunningActivities: DatabaseActiveActivity[] = [];
+      try {
+        const activityRows = await client.query<{
+          pid: number | string;
+          username: string | null;
+          application_name: string | null;
+          state: string | null;
+          wait_event_type: string | null;
+          wait_event: string | null;
+          duration_ms: number | string | null;
+          query_preview: string | null;
+        }>(
+          `SELECT pid::int AS pid,
+                  COALESCE(usename, 'unknown') AS username,
+                  COALESCE(application_name, '') AS application_name,
+                  COALESCE(state, 'unknown') AS state,
+                  wait_event_type,
+                  wait_event,
+                  GREATEST(0, ROUND(EXTRACT(EPOCH FROM (clock_timestamp() - COALESCE(query_start, xact_start, backend_start))) * 1000))::bigint AS duration_ms,
+                  LEFT(COALESCE(query, ''), 240) AS query_preview
+           FROM pg_stat_activity
+           WHERE datname = current_database()
+             AND pid <> pg_backend_pid()
+             AND (
+               state LIKE 'idle in transaction%'
+               OR (state = 'active' AND COALESCE(query, '') NOT ILIKE '%pg_stat_activity%')
+             )
+           ORDER BY duration_ms DESC
+           LIMIT 20`,
+        );
+        longRunningActivities = activityRows.map((row) => ({
+          pid: asFiniteNumber(row.pid),
+          user: row.username ?? "unknown",
+          ...(row.application_name ? { applicationName: row.application_name } : {}),
+          state: row.state ?? "unknown",
+          ...(row.wait_event_type ? { waitEventType: row.wait_event_type } : {}),
+          ...(row.wait_event ? { waitEvent: row.wait_event } : {}),
+          durationMs: asFiniteNumber(row.duration_ms),
+          queryPreview: sanitizeQueryPreview(row.query_preview ?? ""),
+          isIdleInTransaction: (row.state ?? "").startsWith("idle in transaction"),
+        }));
+      } catch {
+        degradedMetrics.push("long_running_activities");
+      }
+
+      let locks: DatabaseLockSummary[] = [];
+      try {
+        const lockRows = await client.query<{
+          pid: number | string;
+          lock_type: string;
+          mode: string;
+          granted: boolean;
+          relation_name: string | null;
+          blocked_by_count: number | string | null;
+          state: string | null;
+          duration_ms: number | string | null;
+          query_preview: string | null;
+        }>(
+          `SELECT l.pid::int AS pid,
+                  l.locktype AS lock_type,
+                  l.mode AS mode,
+                  l.granted AS granted,
+                  CASE WHEN n.nspname IS NOT NULL AND c.relname IS NOT NULL THEN n.nspname || '.' || c.relname ELSE NULL END AS relation_name,
+                  COALESCE(cardinality(pg_blocking_pids(l.pid)), 0)::int AS blocked_by_count,
+                  COALESCE(a.state, 'unknown') AS state,
+                  GREATEST(0, ROUND(EXTRACT(EPOCH FROM (clock_timestamp() - COALESCE(a.query_start, a.xact_start, a.backend_start))) * 1000))::bigint AS duration_ms,
+                  LEFT(COALESCE(a.query, ''), 180) AS query_preview
+           FROM pg_locks l
+           JOIN pg_stat_activity a ON a.pid = l.pid AND a.datname = current_database()
+           LEFT JOIN pg_class c ON c.oid = l.relation
+           LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE l.pid <> pg_backend_pid()
+             AND (NOT l.granted OR cardinality(pg_blocking_pids(l.pid)) > 0 OR l.mode IN ('AccessExclusiveLock', 'ExclusiveLock', 'ShareRowExclusiveLock', 'RowExclusiveLock'))
+           ORDER BY l.granted ASC, blocked_by_count DESC, duration_ms DESC
+           LIMIT 25`,
+        );
+        locks = lockRows.map((row) => ({
+          pid: asFiniteNumber(row.pid),
+          lockType: row.lock_type,
+          mode: row.mode,
+          granted: Boolean(row.granted),
+          ...(row.relation_name ? { relation: row.relation_name } : {}),
+          blockedByCount: asFiniteNumber(row.blocked_by_count),
+          ...(row.state ? { state: row.state } : {}),
+          ...(row.duration_ms !== null ? { durationMs: asFiniteNumber(row.duration_ms) } : {}),
+          ...(row.query_preview ? { queryPreview: sanitizeQueryPreview(row.query_preview) } : {}),
+        }));
+      } catch {
+        degradedMetrics.push("locks");
+      }
+
+      let tableMaintenance: DatabaseTableMaintenance[] = [];
+      try {
+        const maintRows = await client.query<{
+          schema_name: string;
+          table_name: string;
+          table_bytes: number | string | null;
+          index_bytes: number | string | null;
+          total_bytes: number | string | null;
+          estimated_rows: number | string | null;
+          live_rows: number | string | null;
+          dead_rows: number | string | null;
+          seq_scans: number | string | null;
+          index_scans: number | string | null;
+          last_vacuum: string | null;
+          last_autovacuum: string | null;
+          last_analyze: string | null;
+          last_autoanalyze: string | null;
+        }>(
+          `SELECT s.schemaname AS schema_name,
+                  s.relname AS table_name,
+                  pg_table_size(s.relid)::bigint AS table_bytes,
+                  pg_indexes_size(s.relid)::bigint AS index_bytes,
+                  pg_total_relation_size(s.relid)::bigint AS total_bytes,
+                  GREATEST(0, COALESCE(c.reltuples, s.n_live_tup, 0))::bigint AS estimated_rows,
+                  COALESCE(s.n_live_tup, 0)::bigint AS live_rows,
+                  COALESCE(s.n_dead_tup, 0)::bigint AS dead_rows,
+                  COALESCE(s.seq_scan, 0)::bigint AS seq_scans,
+                  COALESCE(s.idx_scan, 0)::bigint AS index_scans,
+                  s.last_vacuum::text AS last_vacuum,
+                  s.last_autovacuum::text AS last_autovacuum,
+                  s.last_analyze::text AS last_analyze,
+                  s.last_autoanalyze::text AS last_autoanalyze
+           FROM pg_stat_user_tables s
+           JOIN pg_class c ON c.oid = s.relid
+           ORDER BY pg_total_relation_size(s.relid) DESC, s.schemaname, s.relname
+           LIMIT 100`,
+        );
+        tableMaintenance = maintRows.map((row) => {
+          const liveRows = asFiniteNumber(row.live_rows);
+          const deadRows = asFiniteNumber(row.dead_rows);
+          const totalRows = liveRows + deadRows;
+          const deadRowRatio = totalRows > 0 ? Math.round((deadRows / totalRows) * 1000) / 1000 : 0;
+          const bloatLevel: DatabaseTableMaintenance["bloatLevel"] =
+            deadRows >= 500 && deadRowRatio >= 0.25
+              ? "high"
+              : deadRows >= 100 && deadRowRatio >= 0.1
+                ? "moderate"
+                : "low";
+          const needsVacuum = deadRows >= 100 && deadRowRatio >= 0.1;
+          const needsAnalyze = liveRows >= 250 && !row.last_analyze && !row.last_autoanalyze;
+          return {
+            tableId: `${row.schema_name}.${row.table_name}`,
+            schema: row.schema_name,
+            table: row.table_name,
+            tableBytes: asFiniteNumber(row.table_bytes),
+            indexBytes: asFiniteNumber(row.index_bytes),
+            totalBytes: asFiniteNumber(row.total_bytes),
+            estimatedRows: asFiniteNumber(row.estimated_rows),
+            liveRows,
+            deadRows,
+            deadRowRatio,
+            seqScans: asFiniteNumber(row.seq_scans),
+            indexScans: asFiniteNumber(row.index_scans),
+            ...(row.last_vacuum ? { lastVacuum: row.last_vacuum } : {}),
+            ...(row.last_autovacuum ? { lastAutoVacuum: row.last_autovacuum } : {}),
+            ...(row.last_analyze ? { lastAnalyze: row.last_analyze } : {}),
+            ...(row.last_autoanalyze ? { lastAutoAnalyze: row.last_autoanalyze } : {}),
+            bloatLevel,
+            needsVacuum,
+            needsAnalyze,
+          };
+        });
+      } catch {
+        degradedMetrics.push("table_maintenance");
+      }
+
+      let indexUsage: DatabaseIndexUsage[] = [];
+      try {
+        const indexUsageRows = await client.query<{
+          schema_name: string;
+          table_name: string;
+          index_name: string;
+          definition: string | null;
+          size_bytes: number | string | null;
+          scans: number | string | null;
+          tuples_read: number | string | null;
+          tuples_fetched: number | string | null;
+          is_unique: boolean;
+          is_primary: boolean;
+        }>(
+          `SELECT ui.schemaname AS schema_name,
+                  ui.relname AS table_name,
+                  ui.indexrelname AS index_name,
+                  COALESCE(pi.indexdef, '') AS definition,
+                  pg_relation_size(ui.indexrelid)::bigint AS size_bytes,
+                  COALESCE(ui.idx_scan, 0)::bigint AS scans,
+                  COALESCE(ui.idx_tup_read, 0)::bigint AS tuples_read,
+                  COALESCE(ui.idx_tup_fetch, 0)::bigint AS tuples_fetched,
+                  COALESCE(ix.indisunique, false) AS is_unique,
+                  COALESCE(ix.indisprimary, false) AS is_primary
+           FROM pg_stat_user_indexes ui
+           JOIN pg_index ix ON ix.indexrelid = ui.indexrelid
+           LEFT JOIN pg_indexes pi
+             ON pi.schemaname = ui.schemaname
+            AND pi.tablename = ui.relname
+            AND pi.indexname = ui.indexrelname
+           ORDER BY pg_relation_size(ui.indexrelid) DESC, ui.schemaname, ui.relname, ui.indexrelname
+           LIMIT 200`,
+        );
+        indexUsage = indexUsageRows.map((row) => {
+          const definition = row.definition ?? "";
+          return {
+            tableId: `${row.schema_name}.${row.table_name}`,
+            schema: row.schema_name,
+            table: row.table_name,
+            indexName: row.index_name,
+            definition,
+            columns: extractIndexColumnsFromDefinition(definition),
+            sizeBytes: asFiniteNumber(row.size_bytes),
+            scans: asFiniteNumber(row.scans),
+            tuplesRead: asFiniteNumber(row.tuples_read),
+            tuplesFetched: asFiniteNumber(row.tuples_fetched),
+            isUnique: Boolean(row.is_unique),
+            isPrimary: Boolean(row.is_primary),
+          };
+        });
+      } catch {
+        degradedMetrics.push("index_usage");
+      }
+
+      let foreignKeysForAnalysis: {
+        readonly id: string;
+        readonly schema: string;
+        readonly name: string;
+        readonly relations: readonly DatabaseRelation[];
+      }[] = [];
+      try {
+        const fkRows = await client.query<{
+          table_schema?: string;
+          table_name?: string;
+          constraint_name: string;
+          column_name: string;
+          foreign_table_schema: string;
+          foreign_table_name: string;
+          foreign_column_name: string;
+        }>(
+          `SELECT k.table_schema,
+                  k.table_name,
+                  k.constraint_name,
+                  k.column_name,
+                  c.table_schema AS foreign_table_schema,
+                  c.table_name AS foreign_table_name,
+                  c.column_name AS foreign_column_name
+           FROM information_schema.key_column_usage k
+           JOIN information_schema.referential_constraints r
+             ON r.constraint_name = k.constraint_name
+            AND r.constraint_schema = k.constraint_schema
+           JOIN information_schema.constraint_column_usage c
+             ON c.constraint_name = r.unique_constraint_name
+            AND c.constraint_schema = r.unique_constraint_schema
+           WHERE k.table_schema NOT IN ('pg_catalog', 'information_schema')
+           ORDER BY k.table_schema, k.table_name, k.constraint_name, k.ordinal_position`,
+        );
+        const byTable = new Map<
+          string,
+          {
+            schema: string;
+            name: string;
+            relations: Map<
+              string,
+              { columns: string[]; referencedTable: string; referencedColumns: string[] }
+            >;
+          }
+        >();
+        for (const row of fkRows) {
+          if (!row.table_schema || !row.table_name) continue;
+          const tableId = `${row.table_schema}.${row.table_name}`;
+          const entry = byTable.get(tableId) ?? {
+            schema: row.table_schema,
+            name: row.table_name,
+            relations: new Map(),
+          };
+          const rel = entry.relations.get(row.constraint_name) ?? {
+            columns: [],
+            referencedTable: `${row.foreign_table_schema}.${row.foreign_table_name}`,
+            referencedColumns: [],
+          };
+          rel.columns.push(row.column_name);
+          rel.referencedColumns.push(row.foreign_column_name);
+          entry.relations.set(row.constraint_name, rel);
+          byTable.set(tableId, entry);
+        }
+        foreignKeysForAnalysis = [...byTable.entries()].map(([id, item]) => ({
+          id,
+          schema: item.schema,
+          name: item.name,
+          relations: [...item.relations.entries()].map(([name, rel]) => ({ name, ...rel })),
+        }));
+      } catch {
+        degradedMetrics.push("foreign_key_analysis");
+      }
+
+      const recommendations = analyzeDatabaseMaintenance({
+        tables: foreignKeysForAnalysis,
+        tableMaintenance,
+        indexUsage,
+      });
+
+      const backup = await fetchSupabaseBackupMetadata(options?.credentials, options?.httpClient);
+
+      return {
+        provider: "supabase",
+        capturedAt: new Date().toISOString(),
+        connections,
+        longRunningActivities,
+        locks,
+        tableMaintenance,
+        indexUsage,
+        recommendations,
+        backup,
+        degradedMetrics,
+      };
+    },
   };
 }
 
@@ -1151,7 +2001,10 @@ export class SupabaseProvider implements BackendProvider {
       listFiles: (bucket, cursor) => this.listFiles(bucket, cursor),
     };
     const database: DatabaseProvider | undefined = this.databaseClient
-      ? createDatabaseProvider(credentials.databaseUrl as string, this.databaseClient)
+      ? createDatabaseProvider(credentials.databaseUrl as string, this.databaseClient, {
+          credentials: this.credentials,
+          httpClient: this.client,
+        })
       : undefined;
     this.services = {
       auth,

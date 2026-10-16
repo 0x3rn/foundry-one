@@ -1,4 +1,39 @@
 import type { ProviderCapabilities, ProviderConnectionState, ProviderName } from "@foundry/types";
+import type { DatabaseOperationsSnapshot, DatabaseSchemaSnapshot } from "./relational-insights";
+
+export {
+  analyzeDatabaseMaintenance,
+  buildDatabaseRelationshipGraph,
+  buildSchemaSnapshotFromParts,
+  computeSchemaSnapshotFingerprint,
+  diffSchemaSnapshots,
+  extractIndexColumnsFromDefinition,
+  normalizeSchemaSnapshot,
+  summarizeSchemaSnapshot,
+  type DatabaseActiveActivity,
+  type DatabaseBackupMetadata,
+  type DatabaseConnectionSummary,
+  type DatabaseErdColumnNode,
+  type DatabaseErdEdge,
+  type DatabaseErdNode,
+  type DatabaseIndexRecommendation,
+  type DatabaseIndexUsage,
+  type DatabaseLockSummary,
+  type DatabaseOperationsSnapshot,
+  type DatabaseRelationshipGraph,
+  type DatabaseSchemaDiff,
+  type DatabaseSchemaDiffEntry,
+  type DatabaseSchemaDiffSummary,
+  type DatabaseSchemaSnapshot,
+  type DatabaseSchemaSnapshotCounts,
+  type DatabaseTableMaintenance,
+  type DatabaseTableSchemaDiff,
+  type DatabaseTableSnapshot,
+  type IndexRecommendationKind,
+  type IndexRecommendationSeverity,
+  type SchemaDiffCategory,
+  type SchemaDiffChangeType,
+} from "./relational-insights";
 
 export type ProviderScalar = string | number | boolean | null;
 export type ProviderRecord = Readonly<Record<string, ProviderScalar | ProviderScalar[]>>;
@@ -220,6 +255,8 @@ export interface DatabaseProvider {
   listColumns?(table: string): Promise<readonly NormalizedColumn[]>;
   describeTable?(table: string): Promise<DatabaseTableDetails>;
   describeCatalog?(): Promise<DatabaseCatalog>;
+  captureSchemaSnapshot?(): Promise<DatabaseSchemaSnapshot>;
+  inspectOperations?(): Promise<DatabaseOperationsSnapshot>;
   createTable?(
     schema: string,
     table: string,

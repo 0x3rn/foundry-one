@@ -4,9 +4,14 @@ import {
   createDatabaseClient,
   PrismaProviderConnectionStore,
   PrismaSavedQueryStore,
+  PrismaSchemaSnapshotStore,
 } from "@foundry/database";
 import { createKeyringFromEnvironment, CredentialVault } from "@foundry/encryption";
-import { ProviderLifecycle } from "@foundry/providers-core";
+import {
+  buildDatabaseRelationshipGraph,
+  diffSchemaSnapshots,
+  ProviderLifecycle,
+} from "@foundry/providers-core";
 import { createSupabaseProvider } from "@foundry/providers-supabase";
 
 loadEnvFile(".env.local");
@@ -18,6 +23,8 @@ try {
     where: { providerConnections: { some: { provider: "supabase" } } },
     select: {
       id: true,
+      name: true,
+      environment: true,
       workspaceId: true,
       workspace: {
         select: {
@@ -56,10 +63,12 @@ try {
     !service?.listTables ||
     !service.describeCatalog ||
     !service.executeQuery ||
-    !service.estimateQueryRows
+    !service.estimateQueryRows ||
+    !service.captureSchemaSnapshot ||
+    !service.inspectOperations
   ) {
     throw new Error(
-      "The connected provider does not expose the database explorer and SQL contract.",
+      "The connected provider does not expose the database explorer, SQL, snapshot, and maintenance contracts.",
     );
   }
   const projectHost = new URL(credentials.projectUrl).hostname;
@@ -106,6 +115,32 @@ try {
     projectId: project.id,
   });
 
+  // Live schema snapshot, ERD graph, zero-false-diff check, and maintenance telemetry
+  const liveSnapshot = await service.captureSchemaSnapshot();
+  const erd = buildDatabaseRelationshipGraph(liveSnapshot);
+  const snapshotStore = new PrismaSchemaSnapshotStore(database);
+  const storedSnapshot = await snapshotStore.create({
+    workspaceId: project.workspaceId,
+    projectId: project.id,
+    projectName: project.name,
+    environment: project.environment,
+    label: "Live verification baseline",
+    createdById: project.workspace.members[0].userId,
+    snapshot: liveSnapshot,
+  });
+  const loadedSnapshot = await snapshotStore.findById(project.workspaceId, storedSnapshot.id);
+  assert.ok(loadedSnapshot);
+  const selfDiff = diffSchemaSnapshots(loadedSnapshot.snapshot, liveSnapshot);
+  assert.equal(selfDiff.identical, true);
+  assert.equal(selfDiff.summary.totalChanges, 0);
+  await snapshotStore.delete({
+    id: storedSnapshot.id,
+    workspaceId: project.workspaceId,
+    projectId: project.id,
+  });
+
+  const operations = await service.inspectOperations();
+
   console.log(
     JSON.stringify({
       projectId: project.id,
@@ -122,6 +157,18 @@ try {
       sqlDurationMs: sqlResult.durationMs,
       estimatedRows: estimatedRows ?? null,
       savedQueryRoundtrip: "ok",
+      snapshotFingerprint: liveSnapshot.fingerprint.slice(0, 12),
+      snapshotCounts: liveSnapshot.counts,
+      erdNodes: erd.nodes.length,
+      erdEdges: erd.edges.length,
+      selfDiffIdentical: selfDiff.identical,
+      snapshotStoreRoundtrip: "ok",
+      activeConnections: operations.connections.totalConnections,
+      tableMaintenanceCount: operations.tableMaintenance.length,
+      indexUsageCount: operations.indexUsage.length,
+      advisoryRecommendationCount: operations.recommendations.length,
+      backupStatus: operations.backup.status,
+      degradedMetrics: operations.degradedMetrics,
     }),
   );
 } catch (error) {

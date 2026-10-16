@@ -20,6 +20,7 @@ import {
   type SchemaColumnDraft,
 } from "@/lib/database-schema-editor";
 import { fetchDatabaseApi, type DatabaseApiResponse } from "@/lib/database-api";
+import { DatabaseInsights } from "@/components/database-insights";
 import { SqlStudio } from "@/components/sql-studio";
 
 interface DatabaseTable {
@@ -1436,14 +1437,21 @@ export function DatabaseExplorer({ projectId }: DatabaseExplorerProps) {
         </div>
       )}
       {!isLoading ? (
-        <SqlStudio
-          projectId={projectId}
-          tables={tables}
-          columns={columns}
-          schemas={(catalog?.schemas ?? []).map((schema) => schema.name)}
-          selectedTable={selectedTable}
-          onDatabaseMutated={() => setReloadToken((current) => current + 1)}
-        />
+        <>
+          <SqlStudio
+            projectId={projectId}
+            tables={tables}
+            columns={columns}
+            schemas={(catalog?.schemas ?? []).map((schema) => schema.name)}
+            selectedTable={selectedTable}
+            onDatabaseMutated={() => setReloadToken((current) => current + 1)}
+          />
+          <DatabaseInsights
+            projectId={projectId}
+            selectedTable={selectedTable}
+            onSelectTable={(tableId) => setSelectedTable(tableId)}
+          />
+        </>
       ) : null}
     </div>
   );

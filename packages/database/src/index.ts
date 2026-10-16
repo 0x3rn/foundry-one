@@ -17,6 +17,21 @@ export {
   type StoredSavedQuery,
   type UpdateSavedQueryInput,
 } from "./saved-query-store";
+export {
+  PrismaSchemaSnapshotStore,
+  SchemaSnapshotError,
+  computeScheduleState,
+  normalizeScheduleIntervalHours,
+  normalizeSnapshotLabel,
+  type CreateSchemaSnapshotInput,
+  type DeleteSchemaSnapshotInput,
+  type ProjectEnvironmentName,
+  type SchemaSnapshotTrigger,
+  type StoredSchemaSnapshot,
+  type StoredSchemaSnapshotSchedule,
+  type StoredSchemaSnapshotSummary,
+  type UpsertSchemaSnapshotScheduleInput,
+} from "./schema-snapshot-store";
 
 export class DatabaseConfigurationError extends Error {
   readonly code = "DATABASE_NOT_CONFIGURED" as const;
