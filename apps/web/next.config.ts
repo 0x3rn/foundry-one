@@ -11,6 +11,7 @@ if (existsSync(localEnvFile)) {
 }
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   outputFileTracingRoot: repositoryRoot,
   outputFileTracingIncludes: {
     "/**": ["../../node_modules/pg-cloudflare/**/*"],
