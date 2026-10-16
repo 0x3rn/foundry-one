@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "foundry-one",
+  "main": "apps/web/.open-next/worker.js",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": "apps/web/.open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "foundry-one"
+    }
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true
+    },
+    "issue_detection": {
+      "enabled": true
+    }
+  },
+  "vars": {
+    "BETTER_AUTH_TRUSTED_ORIGINS": "https://foundry.corstack.dev",
+    "BETTER_AUTH_URL": "https://foundry.corstack.dev",
+    "NODE_ENV": "production",
+    "FOUNDRY_CREDENTIAL_KEY_VERSION": "1"
+  }
+}

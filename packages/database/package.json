@@ -8,7 +8,9 @@
     "@foundry/observability": "0.1.0",
     "@foundry/providers-core": "0.1.0",
     "@foundry/types": "0.1.0",
-    "@prisma/client": "^6.12.0"
+    "@prisma/adapter-pg": "6.12.0",
+    "@prisma/client": "6.12.0",
+    "pg": "^8.16.0"
   },
   "scripts": {
     "build": "prisma generate --schema ../../prisma/schema.prisma && tsc -p tsconfig.json",
@@ -17,7 +19,8 @@
     "test": "node --test"
   },
   "devDependencies": {
+    "@types/pg": "^8.15.4",
     "dotenv": "^17.4.2",
-    "prisma": "^6.12.0"
+    "prisma": "6.12.0"
   }
 }

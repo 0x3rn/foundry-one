@@ -1,3 +1,4 @@
+import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "@prisma/client";
 
 export { Prisma, PrismaClient };
@@ -47,12 +48,10 @@ export function createDatabaseClient(connectionString = process.env.DATABASE_URL
     throw new DatabaseConfigurationError();
   }
 
+  const adapter = new PrismaPg({ connectionString });
+
   return new PrismaClient({
-    datasources: {
-      db: {
-        url: connectionString,
-      },
-    },
+    adapter,
   });
 }
 

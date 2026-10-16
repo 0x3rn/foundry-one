@@ -11,6 +11,10 @@ if (existsSync(localEnvFile)) {
 }
 
 const nextConfig: NextConfig = {
+  outputFileTracingRoot: repositoryRoot,
+  outputFileTracingIncludes: {
+    "/**": ["../../node_modules/pg-cloudflare/**/*"],
+  },
   turbopack: {
     root: repositoryRoot,
   },

@@ -20,6 +20,9 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "cf:build": "npm run db:generate && npm --workspace @foundry/web run cf:build",
+    "cf:preview": "npm run db:generate && npm --workspace @foundry/web run cf:preview",
+    "cf:deploy": "npm run db:generate && npm --workspace @foundry/web run cf:deploy",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
