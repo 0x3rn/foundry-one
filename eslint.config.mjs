@@ -7,6 +7,7 @@ export default defineConfig([
   eslint.configs.recommended,
   globalIgnores([
     ".next/**",
+    ".open-next/**",
     "out/**",
     "build/**",
     "dist/**",

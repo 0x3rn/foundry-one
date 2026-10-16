@@ -29,7 +29,7 @@ export function LoginForm() {
         return;
       }
 
-      router.replace("/");
+      router.replace("/dashboard");
     } catch {
       setError("We could not reach the control plane. Try again in a moment.");
     } finally {

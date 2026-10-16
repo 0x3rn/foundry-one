@@ -56,7 +56,13 @@ async function run(): Promise<void> {
   const unauthenticated = await request("/api/me");
   await assertStatus(unauthenticated, 401, "unauthenticated session check");
 
-  const unauthenticatedPage = await request("/", { redirect: "manual" });
+  const landingPage = await request("/");
+  await assertStatus(landingPage, 200, "public landing page");
+  const landingPageBody = await landingPage.text();
+  assert.match(landingPageBody, /A quieter way to run the backend/);
+  assert.match(landingPageBody, /Universal control plane/);
+
+  const unauthenticatedPage = await request("/dashboard", { redirect: "manual" });
   assert.ok(
     unauthenticatedPage.status === 307 || unauthenticatedPage.status === 308,
     `protected dashboard should redirect unauthenticated users, received HTTP ${unauthenticatedPage.status}`,
@@ -157,7 +163,7 @@ async function run(): Promise<void> {
   const sessionAfterLogin = await request("/api/me");
   await assertStatus(sessionAfterLogin, 200, "protected session check after login");
 
-  const protectedPage = await request("/");
+  const protectedPage = await request("/dashboard");
   await assertStatus(protectedPage, 200, "protected dashboard page after login");
   const protectedPageBody = await protectedPage.text();
   assert.match(protectedPageBody, /Foundry One/);
